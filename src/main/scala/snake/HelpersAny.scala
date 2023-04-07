@@ -224,7 +224,7 @@ def cached[T1 <: Equals, T2](
 def ifInputChanged[T1 <: Equals, T2](
     f: ReactiveStreamAny[T1, T2]
 ): ReactiveStreamAny[T1, Option[T2]] = {
-  def _cached(
+  def _ifInputChanged(
       time: Double,
       argument: T1,
       past: MemoryTupleAny
@@ -250,5 +250,25 @@ def ifInputChanged[T1 <: Equals, T2](
         (Some(output._1), Some((argument, output._1, output._2)))
     }
   }
-  _cached
+  _ifInputChanged
+}
+
+def withPastOutput[T1, T2](
+    f: ReactiveStreamAny[T1, T2]
+): ReactiveStreamAny[T1, (Option[T2], T2)] = {
+  def _withPastOutput(
+      time: Double,
+      argument: T1,
+      past: MemoryTupleAny
+  ): ((Option[T2], T2), Option[Any]) = {
+    val (pastTime, pastValueAny) = past
+    val (pastOutput: Option[T2], pastFValue: Option[Any]) =
+      pastValueAny.map(_.asInstanceOf[(T2, Option[Any])]) match {
+        case None                 => (None, None)
+        case Some(value1, value2) => (Some(value1), value2)
+      }
+    val output = f(time, argument, (pastTime, pastFValue))
+    ((pastOutput, output._1), Some(output._1, output._2))
+  }
+  _withPastOutput
 }
