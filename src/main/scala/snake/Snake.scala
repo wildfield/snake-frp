@@ -243,9 +243,9 @@ object TutorialApp {
 
   // Arguments: speed pulse and direction to move
   def movement(
-      arguments: (Option[Double], Direction)
+      speedPulse: Option[Double],
+      direction: Direction
   ): Option[Vect2d] = {
-    val (speedPulse, direction) = arguments
     speedPulse.map((speed) => Vect2d(direction.x * speed, direction.y * speed))
   }
 
@@ -297,8 +297,8 @@ object TutorialApp {
   def snake(
       bounds: Rect
   ): ReactiveStreamAny[
-    (List[Vect2d], Boolean, Boolean),
-    (Option[Vect2d], Boolean)
+    (Option[Vect2d], Boolean),
+    (List[Vect2d], Boolean)
   ] = {
     def _snake(
         deltaOption: (Option[Vect2d], Boolean),
@@ -340,17 +340,17 @@ object TutorialApp {
     map(toAny(liftWithTimeWithOutput(_snake)), (output) => (output._1, output._2))
   }
 
-  def food(bounds: Rect): ReactiveStream[
-    Vect2d,
-    List[Vect2d],
+  def food(bounds: Rect): ReactiveStreamAny[
+    Option[List[Vect2d]],
     (Vect2d, Boolean)
   ] = {
     def _food(
         time: Double,
-        snake: List[Vect2d],
+        snakeArgument: Option[List[Vect2d]],
         past: MemoryTuple[Vect2d]
     ): ((Vect2d, Boolean), Vect2d) = {
       val oldFoodPosition = past._2.getOrElse(Vect2d(SNAKE_SIZE * 3, SNAKE_SIZE * 4))
+      val snake = snakeArgument.getOrElse(List())
       snake.headOption match {
         case None => ((oldFoodPosition, false), oldFoodPosition)
         case Some(head) =>
@@ -375,7 +375,7 @@ object TutorialApp {
           }
       }
     }
-    _food
+    toAny(_food)
   }
 
   def makeButtonLatch[T1](
@@ -515,184 +515,174 @@ object TutorialApp {
     val leftLatch = makeButtonLatch(leftPress, leftRelease)
     val rightLatch = makeButtonLatch(rightPress, rightRelease)
 
-    val keyTuples = toAnySource(pair(pair(leftLatch, rightLatch), pair(downLatch, upLatch)))
+    val keyTuples = pairSourceAny(
+      pairSourceAny(leftLatch, rightLatch),
+      pairSourceAny(downLatch, upLatch)
+    )
     val keyValues = mapSource(keyTuples, Keys.from_tuples)
 
-    val pLatch =
+    val pause =
       flatMapSource(
         toAnySource(pair(pPress, focusOut)),
         apply(toAny(pauseLatch), _)
       )
-    val desiredDirectionsSignal = mapSource(keyValues, desiredDirections)
+    val desiredDirectionsSource = mapSource(keyValues, desiredDirections)
+    val directionValidation = toAny(liftWithTimeWithOutput(validatedCurrentDirection))
 
-    // val timeWithPause = flatMapSource(
-    //   pLatch,
+    val actualDirection =
+      assumeSource((lastMovedDirection: Option[Direction]) => {
+        flatMapSource(
+          desiredDirectionsSource,
+          desiredDirections => {
+            apply(directionValidation, (desiredDirections, lastMovedDirection))
+          }
+        )
+      })
 
+    val directionWithFeedback =
+      feedbackChannel(
+        flatMap(
+          actualDirection,
+          direction => {
+            flatMapSourceMap(
+              toAny(tick),
+              tick =>
+                mapSource(
+                  latchValue(
+                    Direction(0, 1),
+                    tick.map(_ => direction)
+                  ),
+                  latchedDirection => {
+                    // Latched direction used for feedback channel
+                    // tick conditional direction will be used for movement
+                    (latchedDirection, (tick, latchedDirection))
+                  }
+                )
+            )
+          }
+        )
+      )
+
+    val movementFromTick =
+      map(
+        directionWithFeedback,
+        (tick, direction) => movement(tick, direction)
+      )
+
+    val snakeMovement =
+      flatMap(movementFromTick, applyPartial(snake(bounds), _))
+
+    val snakeWithFood =
+      feedbackChannel(
+        assumeStream((pastSnake: Option[List[Vect2d]]) => {
+          flatMapFromSource(
+            apply(food(bounds), pastSnake),
+            {
+              case (foodPos, didEatFood) => {
+                map(
+                  applyPartial2(snakeMovement, didEatFood),
+                  { case (snake, isGameOver) => (snake, (didEatFood, isGameOver, snake, foodPos)) }
+                )
+              }
+            }
+          )
+        })
+      )
+
+    val snakeWithScore =
+      flatMapSourceMap(
+        snakeWithFood,
+        { case (didEatFood, isGameOver, snake, foodPos) =>
+          mapSource(
+            apply(
+              toAny(liftWithTime(accumulate(1))),
+              didEatFood
+            ),
+            score => (isGameOver, (score, (snake, foodPos)))
+          )
+        }
+      )
+
+    val snakeWithGameOverLatch =
+      flatMapSourceMap(
+        snakeWithScore,
+        { case (isGameOver, rest) =>
+          mapSource(
+            apply(toAny(liftWithOutput(positiveLatch)), isGameOver),
+            latchedGameOver => (latchedGameOver, rest)
+          )
+        }
+      )
+
+    val snakeSource =
+      feedbackChannelSource(
+        assumeSource((input: Option[(Boolean, Int)]) => {
+          val (isGameOver, score) = input.getOrElse((false, 0))
+          flatMapSource(
+            pause,
+            paused => {
+              mapSource(
+                apply(snakeWithGameOverLatch, (isGameOver, score)),
+                { case (isGameOver, (score, rest)) =>
+                  ((isGameOver || paused, score), (isGameOver, score, rest))
+                }
+              )
+            }
+          )
+        })
+      )
+
+    // val stateWithReset = listenToReset(
+    //   map(
+    //     pair(rPress, gameState),
+    //     output => {
+    //       val (rPress, gameState) = output
+    //       (gameState, !rPress.isEmpty)
+    //     }
+    //   )
     // )
-    // val timeWithPause = flatMap(
-    //   pLatch,
-    //   pLatch => {
+    // val stateWithHighScore = flatMapSource(
+    //   stateWithReset,
+    //   output => {
+    //     val (tick, score, food, snake, pause, gameOver) = output
+    //     val highScore = apply(keepIfLarger, score)
     //     map(
-    //       mapInput(
-    //         tick,
-    //         (input: (Boolean, Int)) => (input._1 || pLatch, input._2)
-    //       ),
-    //       tick => (tick, pLatch)
+    //       highScore,
+    //       highScore => {
+    //         (tick, (snake, food, score, highScore, pause && !gameOver, gameOver))
+    //       }
     //     )
     //   }
     // )
-    val resultingMovement =
-      flatMapSource(
-        timeWithPause,
-        output => {
-          val (tick, pause) = output
-          flatMapSource(
-            desiredDirectionsSignal,
-            desiredDirections => {
-              map(
-                pastFlatMapSource(
-                  liftWithTimeWithOutput(validatedCurrentDirection),
-                  (
-                      validatedCurrentDirection,
-                      lastMovedDirection: Option[Option[Direction]]
-                  ) => {
-                    flatMapSource(
-                      apply(
-                        validatedCurrentDirection,
-                        (desiredDirections, lastMovedDirection.flatten)
-                      ),
-                      currentDirection => {
-                        map(
-                          apply(
-                            liftWithOutput(storeDirectionIfMoved[Double]),
-                            (currentDirection, tick)
-                          ),
-                          (currentDirection, _)
-                        )
-                      }
-                    )
-                  }
-                ),
-                movementDirection => {
-                  (movement(tick, movementDirection), pause, tick)
-                }
-              )
-            }
-          )
-        }
-      )
-    val gameState =
-      pastFlatMapSource(
-        resultingMovement,
-        (resultingMovement, memory: Option[(Boolean, Int)]) => {
-          val pastGameOver = memory.map(_._1).getOrElse(false)
-          val pastScore = memory.map(_._2).getOrElse(0)
-          flatMapSource(
-            apply(
-              resultingMovement,
-              (pastGameOver, pastScore)
-            ),
-            output => {
-              val (movement, pause, tick) = output
-              pastFlatMapSource(
-                food(bounds),
-                (food, pastSnakeOption: Option[List[Vect2d]]) => {
-                  val pastSnake = pastSnakeOption.getOrElse(List())
-                  flatMapSource(
-                    apply(
-                      food,
-                      pastSnake
-                    ),
-                    output => {
-                      val (food, didEatFood) = output
-                      flatMapSource(
-                        apply(liftWithTime(accumulate(1)), didEatFood),
-                        score => {
-                          flatMapSource(
-                            apply(
-                              snake(bounds),
-                              (movement, didEatFood)
-                            ),
-                            output => {
-                              val (snake, gameOver) = output
-                              map(
-                                apply(
-                                  liftWithOutput(positiveLatch),
-                                  gameOver
-                                ),
-                                latchedGameOver => {
-                                  (
-                                    (
-                                      (tick, score, food, snake, pause, latchedGameOver),
-                                      (latchedGameOver, score)
-                                    ),
-                                    snake
-                                  )
-                                }
-                              )
-                            }
-                          )
-                        }
-                      )
-                    }
-                  )
-                }
-              )
-            }
-          )
-        }
-      )
-    val stateWithReset = listenToReset(
-      map(
-        pair(rPress, gameState),
-        output => {
-          val (rPress, gameState) = output
-          (gameState, !rPress.isEmpty)
-        }
-      )
-    )
-    val stateWithHighScore = flatMapSource(
-      stateWithReset,
-      output => {
-        val (tick, score, food, snake, pause, gameOver) = output
-        val highScore = apply(keepIfLarger, score)
-        map(
-          highScore,
-          highScore => {
-            (tick, (snake, food, score, highScore, pause && !gameOver, gameOver))
-          }
-        )
-      }
-    )
-    val focusIn = didPress(() => this.focusInTime)
-    // Inputs: Snake, Food, Score, High Score, Pause, Game Over
-    val draws = flatMapSource(
-      stateWithHighScore,
-      output => {
-        val (tick, (snake, food, score, highScore, pause, gameOver)) = output
-        map(
-          flatMapSource(
-            focusIn,
-            focusIn => {
-              apply(
-                shouldRedraw,
-                (tick, pause, gameOver, !focusIn.isEmpty)
-              )
-            }
-          ),
-          shouldRedraw => {
-            if (shouldRedraw) {
-              drawClearScreen(bounds) ::: drawFood(food)
-                ::: drawSnake(snake) ::: drawScore(score)
-                ::: drawHighScore(highScore) ::: drawPause(pause) ::: drawGameOver(gameOver)
-            } else {
-              List()
-            }
-          }
-        )
-      }
-    )
-    val drawOpsResolved = backstep(draws)
+    // val focusIn = didPress(() => this.focusInTime)
+    // // Inputs: Snake, Food, Score, High Score, Pause, Game Over
+    // val draws = flatMapSource(
+    //   stateWithHighScore,
+    //   output => {
+    //     val (tick, (snake, food, score, highScore, pause, gameOver)) = output
+    //     map(
+    //       flatMapSource(
+    //         focusIn,
+    //         focusIn => {
+    //           apply(
+    //             shouldRedraw,
+    //             (tick, pause, gameOver, !focusIn.isEmpty)
+    //           )
+    //         }
+    //       ),
+    //       shouldRedraw => {
+    //         if (shouldRedraw) {
+    //           drawClearScreen(bounds) ::: drawFood(food)
+    //             ::: drawSnake(snake) ::: drawScore(score)
+    //             ::: drawHighScore(highScore) ::: drawPause(pause) ::: drawGameOver(gameOver)
+    //         } else {
+    //           List()
+    //         }
+    //       }
+    //     )
+    //   }
+    // )
+    // val drawOpsResolved = backstep(draws)
 
     document.addEventListener(
       "keydown",
@@ -741,7 +731,7 @@ object TutorialApp {
     )
 
     window.requestAnimationFrame((timestamp: Double) =>
-      TutorialApp.onFrame(timestamp, drawOpsResolved)
+    // TutorialApp.onFrame(timestamp, drawOpsResolved)
     )
   }
 }

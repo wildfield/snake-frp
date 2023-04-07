@@ -72,7 +72,7 @@ def flatMap[T1, T2, T3, T4](
   _flatMap
 }
 
-def flatMapToSource[T1, T2, T3](
+def flatMapSourceMap[T1, T2, T3](
     f: ReactiveStreamAny[T1, T2],
     map: T2 => SourceAny[T3]
 ): ReactiveStreamAny[T1, T3] = {
@@ -357,7 +357,7 @@ def feedback[T1, T2](
   _feedback
 }
 
-def feedbackSource[T1, T2](
+def feedbackSource[T2](
     f: ReactiveStreamAny[Option[T2], T2]
 ): SourceAny[T2] = {
   def _feedbackSource(
@@ -376,7 +376,46 @@ def feedbackSource[T1, T2](
   _feedbackSource
 }
 
-def assume[T1, T2, T3](
+def feedbackChannel[T1, T2, T3](
+    f: ReactiveStreamAny[(Option[T2], T1), (T2, T3)]
+): ReactiveStreamAny[T1, T3] = {
+  def _feedbackSource(
+      time: Double,
+      argument: T1,
+      past: MemoryTupleAny
+  ): (T3, Option[Any]) = {
+    val (pastTime, pastValueAny) = past
+    val (pastOutput: Option[T2], pastFValue: Option[Any]) =
+      pastValueAny.map(_.asInstanceOf[(T2, Option[Any])]) match {
+        case None                 => (None, None)
+        case Some(value1, value2) => (Some(value1), value2)
+      }
+    val output = f(time, (pastOutput, argument), (pastTime, pastFValue))
+    (output._1._2, Some(output._1._1, output._2))
+  }
+  _feedbackSource
+}
+
+def feedbackChannelSource[T2, T3](
+    f: ReactiveStreamAny[Option[T2], (T2, T3)]
+): SourceAny[T3] = {
+  def _feedbackSource(
+      time: Double,
+      past: MemoryTupleAny
+  ): (T3, Option[Any]) = {
+    val (pastTime, pastValueAny) = past
+    val (pastOutput: Option[T2], pastFValue: Option[Any]) =
+      pastValueAny.map(_.asInstanceOf[(T2, Option[Any])]) match {
+        case None                 => (None, None)
+        case Some(value1, value2) => (Some(value1), value2)
+      }
+    val output = f(time, pastOutput, (pastTime, pastFValue))
+    (output._1._2, Some(output._1._1, output._2))
+  }
+  _feedbackSource
+}
+
+def assumeStream[T1, T2, T3](
     f: T1 => ReactiveStreamAny[T2, T3]
 ): ReactiveStreamAny[(T1, T2), T3] = {
   def _assume(
@@ -414,4 +453,218 @@ def apply[T1, T2](
     value1
   }
   _apply
+}
+
+def applyPartial[T1, T2, T3](
+    f1: ReactiveStreamAny[(T1, T2), T3],
+    a: T1
+): ReactiveStreamAny[T2, T3] = {
+  def _apply(
+      time: Double,
+      argument: T2,
+      past: MemoryTupleAny
+  ): (T3, Option[Any]) = {
+    val value1 = f1(time, (a, argument), past)
+    value1
+  }
+  _apply
+}
+
+def applyPartial2[T1, T2, T3](
+    f1: ReactiveStreamAny[(T1, T2), T3],
+    a: T2
+): ReactiveStreamAny[T1, T3] = {
+  def _apply(
+      time: Double,
+      argument: T1,
+      past: MemoryTupleAny
+  ): (T3, Option[Any]) = {
+    val value1 = f1(time, (argument, a), past)
+    value1
+  }
+  _apply
+}
+
+def detectChange[T1 <: Equals](
+    f: SourceAny[T1]
+): SourceAny[(Boolean, T1)] = {
+  def _detectChange(
+      time: Double,
+      past: MemoryTupleAny
+  ): ((Boolean, T1), Option[Any]) = {
+    val (pastTime, pastValueAny) = past
+    val (pastOutput: Option[T1], pastFValue: Option[Any]) =
+      pastValueAny.map(_.asInstanceOf[(T1, Option[Any])]) match {
+        case None                 => (None, None)
+        case Some(value1, value3) => (Some(value1), value3)
+      }
+    val output = f(time, (pastTime, pastFValue))
+    val didOutputChange = pastOutput.map(_.equals(output._1)).getOrElse(true)
+    ((didOutputChange, output._1), Some(output._1, output._2))
+  }
+  _detectChange
+}
+
+def identity[T1](): ReactiveStreamAny[T1, T1] = {
+  def _identity(
+      time: Double,
+      argument: T1,
+      past: MemoryTupleAny
+  ): (T1, Option[Any]) = {
+    (argument, past._2)
+  }
+  _identity
+}
+
+def identitySource[T1](value: T1): SourceAny[T1] = {
+  def _identity(
+      time: Double,
+      past: MemoryTupleAny
+  ): (T1, Option[Any]) = {
+    (value, past._2)
+  }
+  _identity
+}
+
+def connect[T1, T2, T3](
+    f1: ReactiveStreamAny[T1, T2],
+    f2: ReactiveStreamAny[T2, T3]
+): ReactiveStreamAny[T1, T3] = {
+  def _connect(
+      time: Double,
+      argument: T1,
+      past: MemoryTupleAny
+  ): (T3, Option[Any]) = {
+    val (pastTime, pastValueAny) = past
+    val (pastValueF1: Option[Any], pastValueF2: Option[Any]) =
+      pastValueAny.map(_.asInstanceOf[(Option[Any], Option[Any])]) match {
+        case None        => (None, None)
+        case Some(value) => value
+      }
+    val f1Output = f1(time, argument, (pastTime, pastValueF1))
+    val f2Output = f2(time, f1Output._1, (pastTime, pastValueF2))
+    (f2Output._1, Some((f1Output._2, f2Output._2)))
+  }
+  _connect
+}
+
+def pairAny[T1, T2, T3, T4](
+    f1: ReactiveStreamAny[T1, T2],
+    f2: ReactiveStreamAny[T3, T4]
+): ReactiveStreamAny[(T1, T3), (T2, T4)] = {
+  def _pairCombinator(
+      time: Double,
+      argument: (T1, T3),
+      past: MemoryTupleAny
+  ): ((T2, T4), Option[Any]) = {
+    val (pastTime, pastValueAny) = past
+    val (pastValueF1: Option[Any], pastValueF2: Option[Any]) =
+      pastValueAny.map(_.asInstanceOf[(Option[Any], Option[Any])]) match {
+        case None        => (None, None)
+        case Some(value) => value
+      }
+    val value1 = f1(time, argument._1, (pastTime, pastValueF1))
+    val value2 = f2(time, argument._2, (pastTime, pastValueF2))
+    ((value1._1, value2._1), Some((value1._2, value2._2)))
+  }
+  _pairCombinator
+}
+
+def pairSourceAny[T1, T2](
+    f1: SourceAny[T1],
+    f2: SourceAny[T2]
+): SourceAny[(T1, T2)] = {
+  def _pairCombinator(
+      time: Double,
+      past: MemoryTupleAny
+  ): ((T1, T2), Option[Any]) = {
+    val (pastTime, pastValueAny) = past
+    val (pastValueF1: Option[Any], pastValueF2: Option[Any]) =
+      pastValueAny.map(_.asInstanceOf[(Option[Any], Option[Any])]) match {
+        case None        => (None, None)
+        case Some(value) => value
+      }
+    val value1 = f1(time, (pastTime, pastValueF1))
+    val value2 = f2(time, (pastTime, pastValueF2))
+    ((value1._1, value2._1), Some((value1._2, value2._2)))
+  }
+  _pairCombinator
+}
+
+def latch[T1, T2](
+    defaultValue: T2,
+    f1: ReactiveStreamAny[T1, Option[T2]]
+): ReactiveStreamAny[T1, T2] = {
+  def _latch(
+      time: Double,
+      argument: T1,
+      past: MemoryTupleAny
+  ): (T2, Option[Any]) = {
+    val (pastTime, pastValueAny) = past
+    val pastValue: Option[T2] = pastValueAny.map(_.asInstanceOf[T2])
+    val value = f1(time, argument, (pastTime, pastValue))
+    value._1 match {
+      case Some(value) =>
+        (value, Some(value))
+      case None =>
+        pastValue match {
+          case Some(pastValue) =>
+            (pastValue, Some(pastValue))
+          case None =>
+            (defaultValue, Some(defaultValue))
+        }
+    }
+  }
+  _latch
+}
+
+def latchValue[T1](
+    defaultValue: T1,
+    value: Option[T1]
+): SourceAny[T1] = {
+  def _latch(
+      time: Double,
+      past: MemoryTupleAny
+  ): (T1, Option[Any]) = {
+    val (pastTime, pastValueAny) = past
+    val pastValue: Option[T1] = pastValueAny.map(_.asInstanceOf[T1])
+    value match {
+      case Some(value) =>
+        (value, Some(value))
+      case None =>
+        pastValue match {
+          case Some(pastValue) =>
+            (pastValue, Some(pastValue))
+          case None =>
+            (defaultValue, Some(defaultValue))
+        }
+    }
+  }
+  _latch
+}
+
+def latchSource[T1](
+    defaultValue: T1,
+    f1: SourceAny[Option[T1]]
+): SourceAny[T1] = {
+  def _latch(
+      time: Double,
+      past: MemoryTupleAny
+  ): (T1, Option[Any]) = {
+    val (pastTime, pastValueAny) = past
+    val pastValue: Option[T1] = pastValueAny.map(_.asInstanceOf[T1])
+    val value = f1(time, (pastTime, pastValue))
+    value._1 match {
+      case Some(value) =>
+        (value, Some(value))
+      case None =>
+        pastValue match {
+          case Some(pastValue) =>
+            (pastValue, Some(pastValue))
+          case None =>
+            (defaultValue, Some(defaultValue))
+        }
+    }
+  }
+  _latch
 }
