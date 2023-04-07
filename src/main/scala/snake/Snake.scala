@@ -296,10 +296,9 @@ object TutorialApp {
 
   def snake(
       bounds: Rect
-  ): ReactiveStream[
+  ): ReactiveStreamAny[
     (List[Vect2d], Boolean, Boolean),
-    (Option[Vect2d], Boolean),
-    (List[Vect2d], Boolean)
+    (Option[Vect2d], Boolean)
   ] = {
     def _snake(
         deltaOption: (Option[Vect2d], Boolean),
@@ -338,7 +337,7 @@ object TutorialApp {
         }
       }
     }
-    map(liftWithTimeWithOutput(_snake), (output) => (output._1, output._2))
+    map(toAny(liftWithTimeWithOutput(_snake)), (output) => (output._1, output._2))
   }
 
   def food(bounds: Rect): ReactiveStream[
@@ -382,11 +381,11 @@ object TutorialApp {
   def makeButtonLatch[T1](
       press: Source[T1, Option[Double]],
       release: Source[T1, Option[Double]]
-  ): Source[((T1, T1), Option[Double]), Option[Double]] = {
+  ): SourceAny[Option[Double]] = {
     flatMapSource(
-      pair(press, release),
+      toAnySource(pair(press, release)),
       keyPair => {
-        apply(buttonStateLatch, keyPair)
+        apply(toAny(buttonStateLatch), keyPair)
       }
     )
   }
@@ -516,27 +515,32 @@ object TutorialApp {
     val leftLatch = makeButtonLatch(leftPress, leftRelease)
     val rightLatch = makeButtonLatch(rightPress, rightRelease)
 
-    val keyTuples = pair(pair(leftLatch, rightLatch), pair(downLatch, upLatch))
-    val keyValues = map(keyTuples, Keys.from_tuples)
+    val keyTuples = toAnySource(pair(pair(leftLatch, rightLatch), pair(downLatch, upLatch)))
+    val keyValues = mapSource(keyTuples, Keys.from_tuples)
 
     val pLatch =
-      apply(
-        pauseLatch,
-        pair(pPress, focusOut)
+      flatMapSource(
+        toAnySource(pair(pPress, focusOut)),
+        apply(toAny(pauseLatch), _)
       )
-    val desiredDirectionsSignal = map(keyValues, desiredDirections)
-    val timeWithPause = flatMap(
-      pLatch,
-      pLatch => {
-        map(
-          mapInput(
-            tick,
-            (input: (Boolean, Int)) => (input._1 || pLatch, input._2)
-          ),
-          tick => (tick, pLatch)
-        )
-      }
-    )
+    val desiredDirectionsSignal = mapSource(keyValues, desiredDirections)
+
+    // val timeWithPause = flatMapSource(
+    //   pLatch,
+
+    // )
+    // val timeWithPause = flatMap(
+    //   pLatch,
+    //   pLatch => {
+    //     map(
+    //       mapInput(
+    //         tick,
+    //         (input: (Boolean, Int)) => (input._1 || pLatch, input._2)
+    //       ),
+    //       tick => (tick, pLatch)
+    //     )
+    //   }
+    // )
     val resultingMovement =
       flatMapSource(
         timeWithPause,
