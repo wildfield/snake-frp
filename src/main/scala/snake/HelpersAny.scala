@@ -147,7 +147,7 @@ def branch[T1, T2](
       val output = f2(
         time,
         (pastConditionOption.map(_ != condition).getOrElse(true), argument),
-        (pastTime, pastValueF1)
+        (pastTime, pastValueF2)
       )
       (
         output._1,
@@ -156,4 +156,99 @@ def branch[T1, T2](
     }
   }
   _branch
+}
+
+def clearMem[T1, T2](
+    f: ReactiveStreamAny[T1, T2]
+): ReactiveStreamAny[(Boolean, T1), T2] = {
+  def _clearMem(
+      time: Double,
+      argument: (Boolean, T1),
+      past: MemoryTupleAny
+  ): (T2, Option[Any]) = {
+    val (pastTime, pastValueAny) = past
+    if (argument._1) {
+      f(time, argument._2, (pastTime, None))
+    } else {
+      f(time, argument._2, (pastTime, pastValueAny))
+    }
+  }
+  _clearMem
+}
+
+def ignoreInput[T1, T2, T3](
+    f: ReactiveStreamAny[T1, T2]
+): ReactiveStreamAny[(T3, T1), T2] = {
+  def _ignoreInput(
+      time: Double,
+      argument: (T3, T1),
+      past: MemoryTupleAny
+  ): (T2, Option[Any]) = {
+    f(time, argument._2, past)
+  }
+  _ignoreInput
+}
+
+def cached[T1 <: Equals, T2](
+    f: ReactiveStreamAny[T1, T2]
+): ReactiveStreamAny[T1, T2] = {
+  def _cached(
+      time: Double,
+      argument: T1,
+      past: MemoryTupleAny
+  ): (T2, Option[Any]) = {
+    val (pastTime, pastValueAny) = past
+    val (pastInput: Option[T1], pastOutput: Option[T2], pastFValue: Option[Any]) =
+      pastValueAny.map(_.asInstanceOf[(T1, T2, Option[Any])]) match {
+        case None                         => (None, None)
+        case Some(value1, value2, value3) => (Some(value1), Some(value2), value3)
+      }
+    (pastInput, pastOutput) match {
+      case (Some(pastInput), Some(pastOutput)) => {
+        val isInputSame = pastInput.equals(argument)
+        if (isInputSame) {
+          (pastOutput, Some((argument, pastOutput, pastFValue)))
+        } else {
+          val output = f(time, argument, (pastTime, pastFValue))
+          (output._1, Some((argument, output._1, output._2)))
+        }
+      }
+      case _ =>
+        val output = f(time, argument, (pastTime, pastFValue))
+        (output._1, Some((argument, output._1, output._2)))
+    }
+  }
+  _cached
+}
+
+def ifInputChanged[T1 <: Equals, T2](
+    f: ReactiveStreamAny[T1, T2]
+): ReactiveStreamAny[T1, Option[T2]] = {
+  def _cached(
+      time: Double,
+      argument: T1,
+      past: MemoryTupleAny
+  ): (Option[T2], Option[Any]) = {
+    val (pastTime, pastValueAny) = past
+    val (pastInput: Option[T1], pastFValue: Option[Any]) =
+      pastValueAny.map(_.asInstanceOf[(T1, Option[Any])]) match {
+        case None                 => (None, None)
+        case Some(value1, value3) => (Some(value1), value3)
+      }
+    pastInput match {
+      case Some(pastInput) => {
+        val isInputSame = pastInput.equals(argument)
+        if (isInputSame) {
+          (None, Some((argument, pastFValue)))
+        } else {
+          val output = f(time, argument, (pastTime, pastFValue))
+          (Some(output._1), Some((argument, output._1, output._2)))
+        }
+      }
+      case _ =>
+        val output = f(time, argument, (pastTime, pastFValue))
+        (Some(output._1), Some((argument, output._1, output._2)))
+    }
+  }
+  _cached
 }
