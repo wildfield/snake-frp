@@ -730,8 +730,9 @@ object TutorialApp {
       }
     )
 
-    window.requestAnimationFrame((timestamp: Double) =>
-    // TutorialApp.onFrame(timestamp, drawOpsResolved)
-    )
+    // window.requestAnimationFrame((timestamp: Double) => {
+
+    // // TutorialApp.onFrame(timestamp, drawOpsResolved)
+    // )
   }
 }
