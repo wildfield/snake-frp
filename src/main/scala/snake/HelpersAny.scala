@@ -1,6 +1,7 @@
 package snake
 
 import scala.annotation.targetName
+import scala.language.implicitConversions
 
 type Memory = Option[Any]
 type ReactiveStreamAny[Input, Output] =

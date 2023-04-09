@@ -7,3 +7,8 @@ scalaVersion := "3.2.2"
 scalaJSUseMainModuleInitializer := true
 
 libraryDependencies += ("org.scala-js" %%% "scalajs-dom" % "2.4.0")
+
+scalacOptions ++= Seq(
+  "-deprecation",
+  "-feature"
+)

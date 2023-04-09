@@ -4,7 +4,7 @@ import org.scalajs.dom
 import org.scalajs.dom.document
 import org.scalajs.dom.window
 import org.scalajs.dom.html.Canvas
-import org.scalajs.dom.raw.CanvasRenderingContext2D
+import org.scalajs.dom.CanvasRenderingContext2D
 
 import scala.scalajs.js.Date
 import scala.scalajs.js
@@ -349,7 +349,7 @@ object TutorialApp {
             && (head.y / SNAKE_SIZE).toInt == (oldFoodPosition.y / SNAKE_SIZE).toInt
           ) {
             val random = new scala.util.Random
-            lazy val newFoodPositionStream: Stream[Vect2d] = Vect2d(
+            lazy val newFoodPositionStream: LazyList[Vect2d] = Vect2d(
               random.nextInt((bounds.w / SNAKE_SIZE).toInt) * SNAKE_SIZE,
               random.nextInt((bounds.h / SNAKE_SIZE).toInt) * SNAKE_SIZE
             ) #:: newFoodPositionStream.map { _ =>
