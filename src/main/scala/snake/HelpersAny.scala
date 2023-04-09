@@ -387,7 +387,6 @@ def feedbackChannelSource[T2, T3](
   def _feedbackSource(
       past: Memory
   ): (T3, Memory) = {
-    Console.out.println(past)
     val (pastOutput: Option[T2], pastFValue: Option[Any]) =
       past.map(_.asInstanceOf[(T2, Option[Any])]) match {
         case None                 => (None, None)
