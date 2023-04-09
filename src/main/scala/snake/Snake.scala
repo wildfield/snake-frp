@@ -603,19 +603,19 @@ object TutorialApp {
 
           pause
             .flatMapSource(paused => {
-              toAny(tick)
-                .applyValue((time, (isGameOver || paused, score)))
-                .flatMapSource({ tick =>
+              pair(
+                actualDirection
+                  .applyValue(latchedDirection),
+                toAny(tick)
+                  .applyValue((time, (isGameOver || paused, score)))
+              )
+                .flatMapSource({ (direction, tick) =>
                   cachedSource(
-                    tick,
-                    pair(
-                      actualDirection
-                        .applyValue(latchedDirection),
-                      food(bounds)
-                        .applyValue(pastSnake)
-                    )
+                    (direction, tick),
+                    food(bounds)
+                      .applyValue(pastSnake)
                       .flatMapSource({
-                        case (direction, (foodPos, didEatFood)) => {
+                        case (foodPos, didEatFood) => {
                           latchValue(
                             Direction(0, 1),
                             tick.map(_ => direction)
