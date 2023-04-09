@@ -295,7 +295,37 @@ def cached[T1 <: Equals, T2](
         (output._1, Some((argument, output._1, output._2)))
     }
   }
-  _cached _
+  toReactive(_cached)
+}
+
+def cachedSource[T1 <: Equals, T2](
+    inputs: T1,
+    f: Source[T2]
+): Source[T2] = {
+  def _cached(
+      past: Memory
+  ): (T2, Option[Any]) = {
+    val (pastInput: Option[T1], pastOutput: Option[T2], pastFValue: Option[Any]) =
+      past.map(_.asInstanceOf[(T1, T2, Option[Any])]) match {
+        case None                         => (None, None, None)
+        case Some(value1, value2, value3) => (Some(value1), Some(value2), value3)
+      }
+    (pastInput, pastOutput) match {
+      case (Some(pastInput), Some(pastOutput)) => {
+        val isInputSame = pastInput.equals(inputs)
+        if (isInputSame) {
+          (pastOutput, Some((inputs, pastOutput, pastFValue)))
+        } else {
+          val output = f(pastFValue)
+          (output._1, Some((inputs, output._1, output._2)))
+        }
+      }
+      case _ =>
+        val output = f(pastFValue)
+        (output._1, Some((inputs, output._1, output._2)))
+    }
+  }
+  toSource(_cached)
 }
 
 def ifInputChanged[T1 <: Equals, T2](

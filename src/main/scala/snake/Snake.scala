@@ -601,53 +601,54 @@ object TutorialApp {
               .map(value => (Some(value._1), Some(value._2), value._3, value._4))
               .getOrElse((None, None, false, 0))
 
-          val snakeSource =
-            pair(
-              pair(
-                actualDirection
-                  .applyValue(latchedDirection),
-                food(bounds)
-                  .applyValue(pastSnake)
-              ),
-              pause
-                .flatMapSource({ paused =>
-                  toAny(tick)
-                    .applyValue((time, (isGameOver || paused, score)))
-                    .map({ tick => (tick, paused) })
-                })
-            )
-              .flatMapSource({
-                case ((direction, (foodPos, didEatFood)), (tick, paused)) => {
-                  latchValue(
-                    Direction(0, 1),
-                    tick.map(_ => direction)
-                  ).flatMapSource(latchedDirection => {
-                    snake(bounds)
-                      .applyValue((movement(tick, latchedDirection), didEatFood))
-                      .flatMapSource(
-                        { case (snake, isGameOverCurrent) =>
-                          pair(
-                            toAny(accumulate(1))
-                              .applyValue(
-                                didEatFood
-                              ),
-                            toAny(positiveLatch)
-                              .applyValue(isGameOverCurrent)
-                          )
-                            .map({
-                              case (score, isGameOver) => {
-                                (
-                                  (latchedDirection, snake, isGameOver, score),
-                                  (tick, isGameOver, paused, score, snake, foodPos)
-                                )
-                              }
-                            })
+          pause
+            .flatMapSource(paused => {
+              toAny(tick)
+                .applyValue((time, (isGameOver || paused, score)))
+                .flatMapSource({ tick =>
+                  cachedSource(
+                    tick,
+                    pair(
+                      actualDirection
+                        .applyValue(latchedDirection),
+                      food(bounds)
+                        .applyValue(pastSnake)
+                    )
+                      .flatMapSource({
+                        case (direction, (foodPos, didEatFood)) => {
+                          latchValue(
+                            Direction(0, 1),
+                            tick.map(_ => direction)
+                          ).flatMapSource(latchedDirection => {
+                            snake(bounds)
+                              .applyValue((movement(tick, latchedDirection), didEatFood))
+                              .flatMapSource(
+                                { case (snake, isGameOverCurrent) =>
+                                  pair(
+                                    toAny(accumulate(1))
+                                      .applyValue(
+                                        didEatFood
+                                      ),
+                                    toAny(positiveLatch)
+                                      .applyValue(isGameOverCurrent)
+                                  )
+                                    .map({
+                                      case (score, isGameOver) => {
+                                        (
+                                          (latchedDirection, snake, isGameOver, score),
+                                          (tick, isGameOver, paused, score, snake, foodPos)
+                                        )
+                                      }
+                                    })
+                                }
+                              )
+                          })
                         }
-                      )
-                  })
-                }
-              })
-          snakeSource
+                      })
+                  )
+                })
+            })
+
         })
       )
     })
