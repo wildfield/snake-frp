@@ -611,7 +611,7 @@ object TutorialApp {
               )
                 .flatMapSource({ (direction, tick) =>
                   cachedSource(
-                    (direction, tick),
+                    (paused, direction, tick),
                     food(bounds)
                       .applyValue(pastSnake)
                       .flatMapSource({
