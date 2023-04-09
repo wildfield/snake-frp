@@ -117,20 +117,16 @@ object TutorialApp {
 
   def didPress(
       getTime: () => Double
-  ): ReactiveStreamAny[Double, Option[Double]] = {
-    def _didPress(time: Double, past: Option[Double]): (Option[Double], Option[Double]) = {
+  ): (Double, Option[Double]) => Option[Double] = {
+    def _didPress(time: Double, lastTime: Option[Double]): Option[Double] = {
       val pressedTime = getTime()
-      past match {
+      lastTime match {
         case Some(lastTime) =>
-          val pressDetected = (pressedTime >= lastTime) && (pressedTime <= time)
-          (
-            if pressDetected then Some(pressedTime) else None,
-            Some(time)
-          )
-        case None => (None, Some(time))
+          if (pressedTime >= lastTime) && (pressedTime <= time) then Some(pressedTime) else None
+        case None => None
       }
     }
-    toAny(_didPress)
+    _didPress
   }
 
   def accumulate(
@@ -253,7 +249,7 @@ object TutorialApp {
     val result = if (!release.isEmpty) {
       None
     } else if (!press.isEmpty) {
-      press
+      Some(press.get)
     } else {
       past
     }
@@ -372,19 +368,15 @@ object TutorialApp {
   }
 
   def makeButtonLatch(
-      press: ReactiveStreamAny[Double, Option[Double]],
-      release: ReactiveStreamAny[Double, Option[Double]]
-  ): ReactiveStreamAny[Double, Option[Double]] = {
-    assumeInputSource((time: Double) => {
-      pair(
-        press
-          .applyValue(time),
-        release.applyValue(time)
-      )
+      press: (Double, Option[Double]) => Option[Double],
+      release: (Double, Option[Double]) => Option[Double]
+  ): Reactive[(Option[Double], Double), Option[Double]] = {
+    assumeInputSource({
+      case (pastTime: Option[Double], time: Double) => {
+        toAny(buttonStateLatch)
+          .applyValue((press(time, pastTime), release(time, pastTime)))
+      }
     })
-      .flatMapSource(keyPair => {
-        toAny(buttonStateLatch).applyValue(keyPair)
-      })
   }
 
   def drawSnake(snake: List[Vect2d]): List[DrawOp] = {
@@ -487,12 +479,21 @@ object TutorialApp {
     }
   }
 
+  def withPastTime[T](f: (Double, Option[Double]) => T): Reactive[Double, T] =
+    identity[Double]()
+      .withPastOutput()
+      .map({
+        case (pastTime, time) => {
+          f(time, pastTime)
+        }
+      })
+
   var didPressRState = LoopStateMachine(
-    toAny(didPress(() => this.rPressTime)).map(!_.isEmpty)
+    withPastTime(didPress(() => this.rPressTime))
   )
 
   var didFocusInState = LoopStateMachine(
-    didPress(() => this.focusInTime)
+    withPastTime(didPress(() => this.focusInTime))
   )
 
   val drawing =
@@ -553,37 +554,27 @@ object TutorialApp {
 
     val focusOut = didPress(() => this.focusOutTime)
 
-    val upLatch = toAny(makeButtonLatch(upPress, upRelease))
-    val downLatch = toAny(makeButtonLatch(downPress, downRelease))
-    val leftLatch = toAny(makeButtonLatch(leftPress, leftRelease))
-    val rightLatch = toAny(makeButtonLatch(rightPress, rightRelease))
-
     val resultStream = assumeInputSource((time: Double) => {
-      val keyTuples =
-        pair(
-          pair(
-            leftLatch
-              .applyValue(time),
-            rightLatch.applyValue(time)
-          ),
-          pair(
-            downLatch
-              .applyValue(time),
-            upLatch.applyValue(time)
-          )
-        )
+      val keyTuples = identitySource(time)
+        .withPastOutput()
+        .flatMapSource({ case (pastTime: Option[Double], time: Double) =>
+          val up = makeButtonLatch(upPress, upRelease).applyValue((pastTime, time))
+          val down = makeButtonLatch(downPress, downRelease).applyValue((pastTime, time))
+          val left = makeButtonLatch(leftPress, leftRelease).applyValue((pastTime, time))
+          val right = makeButtonLatch(rightPress, rightRelease).applyValue((pastTime, time))
+          pair(pair(left, right), pair(down, up))
+        })
 
       val keyValues = keyTuples.map(Keys.from_tuples)
 
       val pause =
-        pair(
-          pPress
-            .applyValue(time),
-          focusOut.applyValue(time)
-        )
-          .flatMapSource(
-            toAny(pauseLatch).applyValue(_)
-          )
+        identitySource(time)
+          .withPastOutput()
+          .flatMapSource({ case (pastTime: Option[Double], time: Double) =>
+            val p = pPress(time, pastTime)
+            val out = focusOut(time, pastTime)
+            toAny(pauseLatch).applyValue((p, out))
+          })
 
       val directionValidation = toAny(liftWithOutput(validatedCurrentDirection))
 
@@ -669,7 +660,7 @@ object TutorialApp {
       for (step <- 0.until(steps)) {
         val didPressR = didPressRState.run(time)
 
-        if (didPressR) {
+        if (!didPressR.isEmpty) {
           mainState.foreach { _.clear() }
         }
 
