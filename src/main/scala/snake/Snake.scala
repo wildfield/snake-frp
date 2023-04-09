@@ -120,12 +120,15 @@ object TutorialApp {
   ): ReactiveStreamAny[Double, Option[Double]] = {
     def _didPress(time: Double, past: Option[Double]): (Option[Double], Option[Double]) = {
       val pressedTime = getTime()
-      val lastTime = past.getOrElse(0.0)
-      val pressDetected = (pressedTime >= lastTime) && (pressedTime <= time)
-      (
-        if pressDetected then Some(pressedTime) else None,
-        Some(time)
-      )
+      past match {
+        case Some(lastTime) =>
+          val pressDetected = (pressedTime >= lastTime) && (pressedTime <= time)
+          (
+            if pressDetected then Some(pressedTime) else None,
+            Some(time)
+          )
+        case None => (None, Some(time))
+      }
     }
     toAny(_didPress)
   }
@@ -170,6 +173,9 @@ object TutorialApp {
     val (time, (stop, score)) = args
     val accumulatedTime = past.map(_._2).getOrElse(0.0)
     val pastTime = past.map(_._1)
+    Console.out.println(
+      s"time $time stop $stop score $score accumulatedTime $accumulatedTime pastTime $pastTime"
+    )
     pastTime match {
       case Some(pastTime) => {
         val totalAccumulatedTime = (time - pastTime) + accumulatedTime
@@ -485,7 +491,7 @@ object TutorialApp {
   }
 
   var didPressRState = LoopStateMachine(
-    toAny(didPress(() => this.rPressTime)).map(_.isEmpty)
+    toAny(didPress(() => this.rPressTime)).map(!_.isEmpty)
   )
 
   var didFocusInState = LoopStateMachine(
@@ -503,7 +509,9 @@ object TutorialApp {
               val bounds = Rect(0, 0, canvas.width, canvas.height)
               drawClearScreen(bounds) ::: drawFood(food)
                 ::: drawSnake(snake) ::: drawScore(score)
-                ::: drawHighScore(highScore) ::: drawPause(paused) ::: drawGameOver(isGameOver)
+                ::: drawHighScore(highScore) ::: drawPause(paused && !isGameOver) ::: drawGameOver(
+                  isGameOver
+                )
             } else {
               List()
             }
@@ -525,7 +533,7 @@ object TutorialApp {
     var delta = time - pastTime
     val stepTime = (delta / 200.0).max(DELTA_T)
     var steps = (delta / stepTime).floor.toInt
-    ((steps, stepTime, pastTime), Some(time + stepTime * steps))
+    ((steps, stepTime, pastTime), Some(pastTime + stepTime * steps))
   }
 
   var stepsSinceLastState = LoopStateMachine(toAny(stepsSinceLast))
@@ -593,8 +601,6 @@ object TutorialApp {
             })
         })
 
-      toAny(tick).applyValue((0, (true, 1)))
-
       feedbackChannelSource(
         assumeInputSource((input: Option[(Direction, List[Vect2d], Boolean, Int)]) => {
           val (
@@ -611,51 +617,51 @@ object TutorialApp {
             actualDirection
               .applyValue(latchedDirection)
               .flatMapSource(direction => {
-                toAny(tick)
-                  .applyValue((time, (isGameOver, score)))
-                  .flatMapSource(tick =>
-                    latchValue(
-                      Direction(0, 1),
-                      tick.map(_ => direction)
-                    ).flatMapSource(latchedDirection => {
-                      val movementFromTick =
-                        movement(tick, latchedDirection)
+                pause.flatMapSource(paused => {
+                  toAny(tick)
+                    .applyValue((time, (isGameOver || paused, score)))
+                    .flatMapSource(tick =>
+                      latchValue(
+                        Direction(0, 1),
+                        tick.map(_ => direction)
+                      ).flatMapSource(latchedDirection => {
+                        val movementFromTick =
+                          movement(tick, latchedDirection)
 
-                      val snakeMovement = applyPartial(snake(bounds), movementFromTick)
-                      food(bounds)
-                        .applyValue(pastSnake)
-                        .flatMapSource(
-                          {
-                            case (foodPos, didEatFood) => {
-                              snakeMovement
-                                .applyValue(didEatFood)
-                                .flatMapSource(
-                                  { case (snake, isGameOverCurrent) =>
-                                    pair(
-                                      toAny(accumulate(1))
-                                        .applyValue(
-                                          didEatFood
-                                        ),
-                                      toAny(positiveLatch)
-                                        .applyValue(isGameOverCurrent)
-                                    )
-                                      .flatMapSource({
-                                        case (score, isGameOver) => {
-                                          pause.map(paused => {
+                        val snakeMovement = applyPartial(snake(bounds), movementFromTick)
+                        food(bounds)
+                          .applyValue(pastSnake)
+                          .flatMapSource(
+                            {
+                              case (foodPos, didEatFood) => {
+                                snakeMovement
+                                  .applyValue(didEatFood)
+                                  .flatMapSource(
+                                    { case (snake, isGameOverCurrent) =>
+                                      pair(
+                                        toAny(accumulate(1))
+                                          .applyValue(
+                                            didEatFood
+                                          ),
+                                        toAny(positiveLatch)
+                                          .applyValue(isGameOverCurrent)
+                                      )
+                                        .map({
+                                          case (score, isGameOver) => {
                                             (
                                               (latchedDirection, snake, isGameOver, score),
                                               (tick, isGameOver, paused, score, snake, foodPos)
                                             )
-                                          })
-                                        }
-                                      })
-                                  }
-                                )
+                                          }
+                                        })
+                                    }
+                                  )
+                              }
                             }
-                          }
-                        )
-                    })
-                  )
+                          )
+                      })
+                    )
+                })
               })
 
           snakeSource
@@ -664,58 +670,6 @@ object TutorialApp {
     })
 
     mainState = Some(LoopStateMachine(resultStream))
-
-    // val stateWithReset = listenToReset(
-    //   map(
-    //     pair(rPress, gameState),
-    //     output => {
-    //       val (rPress, gameState) = output
-    //       (gameState, !rPress.isEmpty)
-    //     }
-    //   )
-    // )
-    // val stateWithHighScore = flatMapSource(
-    //   stateWithReset,
-    //   output => {
-    //     val (tick, score, food, snake, pause, gameOver) = output
-    //     val highScore = apply(keepIfLarger, score)
-    //     map(
-    //       highScore,
-    //       highScore => {
-    //         (tick, (snake, food, score, highScore, pause && !gameOver, gameOver))
-    //       }
-    //     )
-    //   }
-    // )
-    //
-    // // Inputs: Snake, Food, Score, High Score, Pause, Game Over
-    // val draws = flatMapSource(
-    //   stateWithHighScore,
-    //   output => {
-    //     val (tick, (snake, food, score, highScore, pause, gameOver)) = output
-    //     map(
-    //       flatMapSource(
-    //         focusIn,
-    //         focusIn => {
-    //           apply(
-    //             shouldRedraw,
-    //             (tick, pause, gameOver, !focusIn.isEmpty)
-    //           )
-    //         }
-    //       ),
-    //       shouldRedraw => {
-    // if (shouldRedraw) {
-    //   drawClearScreen(bounds) ::: drawFood(food)
-    //     ::: drawSnake(snake) ::: drawScore(score)
-    //     ::: drawHighScore(highScore) ::: drawPause(pause) ::: drawGameOver(gameOver)
-    // } else {
-    //   List()
-    // }
-    //       }
-    //     )
-    //   }
-    // )
-    // val drawOpsResolved = backstep(draws)
 
     val drawOps = (time: Double) => {
       val (steps, stepTime, pastTime) = stepsSinceLastState.run(time)
@@ -733,7 +687,7 @@ object TutorialApp {
             val (tick, isGameOver, paused, score, snake, foodPos) =
               mainState.run(pastTime + step * stepTime)
             val highScore = highScoreState.run(score)
-            val didFocusIn = didFocusInState.run(time).isEmpty
+            val didFocusIn = !didFocusInState.run(time).isEmpty
             ops = drawState.run(
               (tick, isGameOver, paused, score, snake, foodPos, highScore, didFocusIn)
             )

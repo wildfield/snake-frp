@@ -196,18 +196,18 @@ implicit def toReactive[Input, Output](
 def toAny[T1, T2, T3](f: ReactiveStream[T1, T2, T3]): Reactive[T2, T3] = {
   def _toAny(argument: T2, pastAny: Memory): (T3, Memory) = {
     val pastValueAny = pastAny
-    val pastValue = pastValueAny.flatMap(_.asInstanceOf[Option[T1]])
+    val pastValue = pastValueAny.map(_.asInstanceOf[T1])
     val output = f(argument, pastValue)
-    (output._1, Some(output._2))
+    (output._1, output._2)
   }
   toReactive(_toAny)
 }
 
 def toSourceAny[T1, T2](f: OldSource[T1, T2]): Source[T2] = {
   def _toAny(pastAny: Memory): (T2, Memory) = {
-    val pastValue = pastAny.flatMap(_.asInstanceOf[Option[T1]])
+    val pastValue = pastAny.map(_.asInstanceOf[T1])
     val output = f(pastValue)
-    (output._1, Some(output._2))
+    (output._1, output._2)
   }
   toSource(_toAny)
 }
@@ -387,6 +387,7 @@ def feedbackChannelSource[T2, T3](
   def _feedbackSource(
       past: Memory
   ): (T3, Memory) = {
+    Console.out.println(past)
     val (pastOutput: Option[T2], pastFValue: Option[Any]) =
       past.map(_.asInstanceOf[(T2, Option[Any])]) match {
         case None                 => (None, None)
@@ -407,7 +408,7 @@ def assumeInput[T1, T2, T3](
   ): (T3, Memory) = {
     f(argument._1)(argument._2, past)
   }
-  _assume _
+  toReactive(_assume)
 }
 
 def assumeInputSource[T1, T2](
@@ -419,7 +420,7 @@ def assumeInputSource[T1, T2](
   ): (T2, Memory) = {
     f(argument)(past)
   }
-  _assumeSource _
+  toReactive(_assumeSource)
 }
 
 def applyPartial[T1, T2, T3](
@@ -433,7 +434,7 @@ def applyPartial[T1, T2, T3](
     val value1 = f1((a, argument), past)
     value1
   }
-  _apply _
+  toReactive(_apply)
 }
 
 def applyPartial2[T1, T2, T3](
@@ -447,7 +448,7 @@ def applyPartial2[T1, T2, T3](
     val value1 = f1((argument, a), past)
     value1
   }
-  _apply _
+  toReactive(_apply)
 }
 
 def detectChange[T1 <: Equals](
