@@ -625,16 +625,12 @@ object TutorialApp {
                         Direction(0, 1),
                         tick.map(_ => direction)
                       ).flatMapSource(latchedDirection => {
-                        val movementFromTick =
-                          movement(tick, latchedDirection)
-
-                        val snakeMovement = applyPartial(snake(bounds), movementFromTick)
                         food(bounds)
                           .applyValue(pastSnake)
                           .flatMapSource(
                             {
                               case (foodPos, didEatFood) => {
-                                snakeMovement
+                                applyPartial(snake(bounds), movement(tick, latchedDirection))
                                   .applyValue(didEatFood)
                                   .flatMapSource(
                                     { case (snake, isGameOverCurrent) =>
