@@ -505,12 +505,12 @@ object TutorialApp {
     val resultStream = assumeInputSource((time: Double) => {
       val keyTuplesPre = sharedPair(
         sharedPair(
-          makeButtonLatch(upPress, upRelease),
-          makeButtonLatch(downPress, downRelease)
-        ),
-        sharedPair(
           makeButtonLatch(leftPress, leftRelease),
           makeButtonLatch(rightPress, rightRelease)
+        ),
+        sharedPair(
+          makeButtonLatch(downPress, downRelease),
+          makeButtonLatch(upPress, upRelease)
         )
       )
 
