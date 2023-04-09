@@ -614,52 +614,51 @@ object TutorialApp {
               .getOrElse((None, None, false, 0))
 
           val snakeSource =
-            actualDirection
-              .applyValue(latchedDirection)
-              .flatMapSource(direction => {
-                pause.flatMapSource(paused => {
+            pair(
+              pair(
+                actualDirection
+                  .applyValue(latchedDirection),
+                food(bounds)
+                  .applyValue(pastSnake)
+              ),
+              pause
+                .flatMapSource({ paused =>
                   toAny(tick)
                     .applyValue((time, (isGameOver || paused, score)))
-                    .flatMapSource(tick =>
-                      latchValue(
-                        Direction(0, 1),
-                        tick.map(_ => direction)
-                      ).flatMapSource(latchedDirection => {
-                        food(bounds)
-                          .applyValue(pastSnake)
-                          .flatMapSource(
-                            {
-                              case (foodPos, didEatFood) => {
-                                applyPartial(snake(bounds), movement(tick, latchedDirection))
-                                  .applyValue(didEatFood)
-                                  .flatMapSource(
-                                    { case (snake, isGameOverCurrent) =>
-                                      pair(
-                                        toAny(accumulate(1))
-                                          .applyValue(
-                                            didEatFood
-                                          ),
-                                        toAny(positiveLatch)
-                                          .applyValue(isGameOverCurrent)
-                                      )
-                                        .map({
-                                          case (score, isGameOver) => {
-                                            (
-                                              (latchedDirection, snake, isGameOver, score),
-                                              (tick, isGameOver, paused, score, snake, foodPos)
-                                            )
-                                          }
-                                        })
-                                    }
-                                  )
-                              }
-                            }
-                          )
-                      })
-                    )
+                    .map({ tick => (tick, paused) })
                 })
+            )
+              .flatMapSource({
+                case ((direction, (foodPos, didEatFood)), (tick, paused)) => {
+                  latchValue(
+                    Direction(0, 1),
+                    tick.map(_ => direction)
+                  ).flatMapSource(latchedDirection => {
+                    snake(bounds)
+                      .applyValue((movement(tick, latchedDirection), didEatFood))
+                      .flatMapSource(
+                        { case (snake, isGameOverCurrent) =>
+                          pair(
+                            toAny(accumulate(1))
+                              .applyValue(
+                                didEatFood
+                              ),
+                            toAny(positiveLatch)
+                              .applyValue(isGameOverCurrent)
+                          )
+                            .map({
+                              case (score, isGameOver) => {
+                                (
+                                  (latchedDirection, snake, isGameOver, score),
+                                  (tick, isGameOver, paused, score, snake, foodPos)
+                                )
+                              }
+                            })
+                        }
+                      )
+                  })
+                }
               })
-
           snakeSource
         })
       )
