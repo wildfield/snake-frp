@@ -241,7 +241,7 @@ def branch[T1, T2](
   ): (T2, Memory) = {
     val (pastConditionOption: Option[Boolean], pastValueF1: Option[Any], pastValueF2: Option[Any]) =
       past.map(_.asInstanceOf[(Boolean, Option[Any], Option[Any])]) match {
-        case None                           => (None, None)
+        case None                           => (None, None, None)
         case Some((value1, value2, value3)) => (Some(value1), value2, value3)
       }
     if (condition) {
@@ -276,7 +276,7 @@ def cached[T1 <: Equals, T2](
   ): (T2, Option[Any]) = {
     val (pastInput: Option[T1], pastOutput: Option[T2], pastFValue: Option[Any]) =
       past.map(_.asInstanceOf[(T1, T2, Option[Any])]) match {
-        case None                         => (None, None)
+        case None                         => (None, None, None)
         case Some(value1, value2, value3) => (Some(value1), Some(value2), value3)
       }
     (pastInput, pastOutput) match {
