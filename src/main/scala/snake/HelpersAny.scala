@@ -12,16 +12,16 @@ def toAny[T1, T2, T3](f: ReactiveStream[T1, T2, T3]): ReactiveStreamAny[T2, T3] 
   def _toAny(argument: T2, pastAny: Memory): (T3, Memory) = {
     val pastValueAny = pastAny
     val pastValue = pastValueAny.flatMap(_.asInstanceOf[Option[T1]])
-    val output = f(0, argument, (Some(0), pastValue))
+    val output = f(argument, pastValue)
     (output._1, Some(output._2))
   }
   _toAny
 }
 
-def toAnySource[T1, T2](f: Source[T1, T2]): SourceAny[T2] = {
-  def _toAny(pastAny: Memory): (T2, Option[Any]) = {
+def toSourceAny[T1, T2](f: Source[T1, T2]): SourceAny[T2] = {
+  def _toAny(pastAny: Memory): (T2, Memory) = {
     val pastValue = pastAny.flatMap(_.asInstanceOf[Option[T1]])
-    val output = f(0, (Some(0), pastValue))
+    val output = f(pastValue)
     (output._1, Some(output._2))
   }
   _toAny
@@ -381,7 +381,7 @@ def feedbackChannelSource[T2, T3](
   _feedbackSource
 }
 
-def assumeStream[T1, T2, T3](
+def assumeInput[T1, T2, T3](
     f: T1 => ReactiveStreamAny[T2, T3]
 ): ReactiveStreamAny[(T1, T2), T3] = {
   def _assume(
@@ -393,7 +393,7 @@ def assumeStream[T1, T2, T3](
   _assume
 }
 
-def assumeSource[T1, T2](
+def assumeInputSource[T1, T2](
     f: T1 => SourceAny[T2]
 ): ReactiveStreamAny[T1, T2] = {
   def _assumeSource(
