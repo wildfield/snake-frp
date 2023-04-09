@@ -12,6 +12,8 @@ import scala.scalajs.js
 import scala.annotation.targetName
 import snake._
 import scala.collection.mutable.ArrayBuffer
+import scala.collection.mutable.HashMap
+import java.awt.Event
 
 case class Vect2d(x: Double, y: Double)
 case class Rect(x: Double, y: Double, w: Double, h: Double)
@@ -20,6 +22,10 @@ case class Direction(x: Int, y: Int)
 sealed trait DrawOp
 case class DrawRect(x: Double, y: Double, w: Double, h: Double, color: String) extends DrawOp
 case class DrawText(x: Double, y: Double, text: String, font: String, color: String) extends DrawOp
+
+enum EventType:
+  case LeftKeyPress, RightKeyPress, UpKeyPress, DownKeyPress, LeftKeyRelease, RightKeyRelease,
+  UpKeyRelease, DownKeyRelease, PKeyPress, RKeyPress, FocusIn, FocusOut
 
 case class Keys(
     left: Option[Double],
@@ -44,86 +50,30 @@ object TutorialApp {
   val ctx =
     canvas.getContext("2d", Map("alpha" -> false)).asInstanceOf[dom.CanvasRenderingContext2D]
 
-  var counter = 0
+  var events = scala.collection.mutable.HashMap[EventType, Double]()
 
-  var rPressTime: Double = Double.MinValue
-  var pPressTime: Double = Double.MinValue
+  def record(event: EventType): Unit = {
+    val time = curTime()
+    events(event) = time
+  }
 
-  var leftPressTime: Double = Double.MinValue
-  var rightPressTime: Double = Double.MinValue
-  var upPressTime: Double = Double.MinValue
-  var downPressTime: Double = Double.MinValue
-
-  var leftReleaseTime: Double = Double.MinValue
-  var rightReleaseTime: Double = Double.MinValue
-  var upReleaseTime: Double = Double.MinValue
-  var downReleaseTime: Double = Double.MinValue
-
-  var focusInTime: Double = Double.MinValue
-  var focusOutTime: Double = Double.MinValue
+  def getEventTime(event: EventType): Option[Double] =
+    events.get(event)
 
   val start = new Date()
 
   def curTime(): Double =
     (new Date()).getTime() - start.getTime()
 
-  def onFocusIn(): Unit = {
-    focusInTime = curTime()
-  }
-
-  def onFocusOut(): Unit = {
-    focusOutTime = curTime()
-  }
-
-  def onPressP(): Unit = {
-    pPressTime = curTime()
-  }
-
-  def onPressR(): Unit = {
-    rPressTime = curTime()
-  }
-
-  def onPressLeft(): Unit = {
-    leftPressTime = curTime()
-  }
-
-  def onPressRight(): Unit = {
-    rightPressTime = curTime()
-  }
-
-  def onPressUp(): Unit = {
-    upPressTime = curTime()
-  }
-
-  def onPressDown(): Unit = {
-    downPressTime = curTime()
-  }
-
-  def onReleaseLeft(): Unit = {
-    leftReleaseTime = curTime()
-  }
-
-  def onReleaseRight(): Unit = {
-    rightReleaseTime = curTime()
-  }
-
-  def onReleaseUp(): Unit = {
-    upReleaseTime = curTime()
-  }
-
-  def onReleaseDown(): Unit = {
-    downReleaseTime = curTime()
-  }
-
   def didPress(
-      getTime: () => Double
+      event: EventType
   ): (Double, Option[Double]) => Option[Double] = {
     def _didPress(time: Double, lastTime: Option[Double]): Option[Double] = {
-      val pressedTime = getTime()
-      lastTime match {
-        case Some(lastTime) =>
+      val pressedTime = getEventTime(event)
+      (pressedTime, lastTime) match {
+        case (Some(pressedTime), Some(lastTime)) =>
           if (pressedTime >= lastTime) && (pressedTime <= time) then Some(pressedTime) else None
-        case None => None
+        case _ => None
       }
     }
     _didPress
@@ -488,12 +438,12 @@ object TutorialApp {
         }
       })
 
-  var didPressRState = LoopStateMachine(
-    withPastTime(didPress(() => this.rPressTime))
+  var didPressRState = create(
+    withPastTime(didPress(EventType.RKeyPress))
   )
 
-  var didFocusInState = LoopStateMachine(
-    withPastTime(didPress(() => this.focusInTime))
+  var didFocusInState = create(
+    withPastTime(didPress(EventType.FocusIn))
   )
 
   val drawing =
@@ -515,13 +465,13 @@ object TutorialApp {
             }
           })
     )
-  var drawState = LoopStateMachine(drawing)
+  var drawState = create(drawing)
 
   var mainState: Option[
-    LoopStateMachine[Double, (Option[Double], Boolean, Boolean, Int, List[Vect2d], Vect2d)]
+    StatefulStream[Double, (Option[Double], Boolean, Boolean, Int, List[Vect2d], Vect2d)]
   ] =
     None
-  var highScoreState = LoopStateMachine(toAny(keepIfLarger))
+  var highScoreState = create(toAny(keepIfLarger))
 
   def stepsSinceLast(
       time: Double,
@@ -534,43 +484,46 @@ object TutorialApp {
     ((steps, stepTime, pastTime), Some(pastTime + stepTime * steps))
   }
 
-  var stepsSinceLastState = LoopStateMachine(toAny(stepsSinceLast))
+  var stepsSinceLastState = create(toAny(stepsSinceLast))
 
   def main(args: Array[String]): Unit = {
     val bounds = Rect(0, 0, canvas.width, canvas.height)
 
-    val upPress = didPress(() => this.upPressTime)
-    val downPress = didPress(() => this.downPressTime)
-    val leftPress = didPress(() => this.leftPressTime)
-    val rightPress = didPress(() => this.rightPressTime)
+    val upPress = didPress(EventType.UpKeyPress)
+    val downPress = didPress(EventType.DownKeyPress)
+    val leftPress = didPress(EventType.LeftKeyPress)
+    val rightPress = didPress(EventType.RightKeyPress)
 
-    val upRelease = didPress(() => this.upReleaseTime)
-    val downRelease = didPress(() => this.downReleaseTime)
-    val leftRelease = didPress(() => this.leftReleaseTime)
-    val rightRelease = didPress(() => this.rightReleaseTime)
+    val upRelease = didPress(EventType.UpKeyRelease)
+    val downRelease = didPress(EventType.DownKeyRelease)
+    val leftRelease = didPress(EventType.LeftKeyRelease)
+    val rightRelease = didPress(EventType.RightKeyRelease)
 
-    val rPress = didPress(() => this.rPressTime)
-    val pPress = didPress(() => this.pPressTime)
-
-    val focusOut = didPress(() => this.focusOutTime)
+    val pPress = didPress(EventType.PKeyPress)
+    val focusOut = didPress(EventType.FocusOut)
 
     val resultStream = assumeInputSource((time: Double) => {
-      val keyTuples = identitySource(time)
-        .withPastOutput()
-        .flatMapSource({ case (pastTime: Option[Double], time: Double) =>
-          val up = makeButtonLatch(upPress, upRelease).applyValue((pastTime, time))
-          val down = makeButtonLatch(downPress, downRelease).applyValue((pastTime, time))
-          val left = makeButtonLatch(leftPress, leftRelease).applyValue((pastTime, time))
-          val right = makeButtonLatch(rightPress, rightRelease).applyValue((pastTime, time))
-          pair(pair(left, right), pair(down, up))
-        })
+      val keyTuplesPre = sharedPair(
+        sharedPair(
+          makeButtonLatch(leftPress, leftRelease),
+          makeButtonLatch(rightPress, rightRelease)
+        ),
+        sharedPair(
+          makeButtonLatch(downPress, downRelease),
+          makeButtonLatch(upPress, upRelease)
+        )
+      )
+
+      val keyTuples = repeatPast(time)
+        .flatMapSource { case (pastTime: Option[Double]) =>
+          keyTuplesPre.applyValue((pastTime, time))
+        }
 
       val keyValues = keyTuples.map(Keys.from_tuples)
 
       val pause =
-        identitySource(time)
-          .withPastOutput()
-          .flatMapSource({ case (pastTime: Option[Double], time: Double) =>
+        repeatPast(time)
+          .flatMapSource({ case (pastTime: Option[Double]) =>
             val p = pPress(time, pastTime)
             val out = focusOut(time, pastTime)
             toAny(pauseLatch).applyValue((p, out))
@@ -653,7 +606,7 @@ object TutorialApp {
       )
     })
 
-    mainState = Some(LoopStateMachine(resultStream))
+    mainState = Some(create(resultStream))
 
     val drawOps = (time: Double) => {
       val (steps, stepTime, pastTime) = stepsSinceLastState.run(time)
@@ -687,17 +640,17 @@ object TutorialApp {
       (e: dom.KeyboardEvent) =>
         e.key match {
           case "r" | "R" =>
-            onPressR()
+            record(EventType.RKeyPress)
           case "ArrowLeft" =>
-            onPressLeft()
+            record(EventType.LeftKeyPress)
           case "ArrowRight" =>
-            onPressRight()
+            record(EventType.RightKeyPress)
           case "ArrowUp" =>
-            onPressUp()
+            record(EventType.UpKeyPress)
           case "ArrowDown" =>
-            onPressDown()
+            record(EventType.DownKeyPress)
           case "p" | "P" =>
-            onPressP()
+            record(EventType.PKeyPress)
           case _ => ()
         }
     )
@@ -706,13 +659,13 @@ object TutorialApp {
       (e: dom.KeyboardEvent) => {
         e.key match {
           case "ArrowLeft" =>
-            onReleaseLeft()
+            record(EventType.LeftKeyRelease)
           case "ArrowRight" =>
-            onReleaseRight()
+            record(EventType.RightKeyRelease)
           case "ArrowUp" =>
-            onReleaseUp()
+            record(EventType.UpKeyRelease)
           case "ArrowDown" =>
-            onReleaseDown()
+            record(EventType.DownKeyRelease)
           case _ => ()
         }
       }
@@ -721,9 +674,9 @@ object TutorialApp {
       "visibilitychange",
       (e: dom.Event) => {
         if (document.visibilityState == "hidden") {
-          onFocusOut()
+          record(EventType.FocusOut)
         } else {
-          onFocusIn()
+          record(EventType.FocusIn)
         }
       }
     )
