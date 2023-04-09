@@ -11,7 +11,7 @@ def create[Input, Output](
     stream: ReactiveStreamAny[Input, Output]
 ): StatefulStream[Input, Output] = LoopStateMachine(stream)
 
-def connect[Input, Intermediate, Output](
+def connectStatefulStreams[Input, Intermediate, Output](
     m1: StatefulStream[Input, Intermediate],
     m2: StatefulStream[Intermediate, Output]
 ): StatefulStream[Input, Output] = ConnectedStream(m1, m2)
