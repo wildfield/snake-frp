@@ -325,7 +325,7 @@ def ifInputChanged[T1 <: Equals, T2](
         (Some(output._1), Some((argument, output._1, output._2)))
     }
   }
-  _ifInputChanged _
+  toReactive(_ifInputChanged)
 }
 
 def feedback[T1, T2](
@@ -343,7 +343,7 @@ def feedback[T1, T2](
     val output = f((pastOutput, argument), pastFValue)
     (output._1, Some(output._1, output._2))
   }
-  _feedback _
+  toReactive(_feedback)
 }
 
 def feedbackSource[T2](
@@ -504,7 +504,7 @@ def connect[T1, T2, T3](
     val f2Output = f2(f1Output._1, pastValueF2)
     (f2Output._1, Some((f1Output._2, f2Output._2)))
   }
-  _connect _
+  toReactive(_connect)
 }
 
 def pair[T1, T2, T3, T4](
