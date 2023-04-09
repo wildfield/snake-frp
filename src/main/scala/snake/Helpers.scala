@@ -8,8 +8,6 @@ type Time = Double
 
 type ReactiveStream[Memory, Input, Output] =
   (Input, Option[Memory]) => (Output, Option[Memory])
-type Source[Memory, Output] =
-  (Option[Memory]) => (Output, Option[Memory])
 
 def liftWithOutput[Memory, Input](
     f: (Input, Option[Memory]) => Memory

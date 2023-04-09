@@ -365,17 +365,15 @@ object TutorialApp {
       press: ReactiveStreamAny[Double, Option[Double]],
       release: ReactiveStreamAny[Double, Option[Double]]
   ): ReactiveStreamAny[Double, Option[Double]] = {
-    flatMapSourceMap(
-      assumeInputSource((time: Double) => {
-        pairSourceAny(
-          applyValue(press, time),
-          applyValue(release, time)
-        )
-      }),
-      keyPair => {
-        applyValue(toAny(buttonStateLatch), keyPair)
-      }
-    )
+    assumeInputSource((time: Double) => {
+      pairSourceAny(
+        press.applyValue(time),
+        release.applyValue(time)
+      )
+    })
+      .flatMapSource(keyPair => {
+        toAny(buttonStateLatch).applyValue(keyPair)
+      })
   }
 
   def drawSnake(snake: List[Vect2d]): List[DrawOp] = {
@@ -525,39 +523,37 @@ object TutorialApp {
       val keyTuples =
         pairSourceAny(
           pairSourceAny(
-            applyValue(leftLatch, time),
-            applyValue(rightLatch, time)
+            leftLatch.applyValue(time),
+            rightLatch.applyValue(time)
           ),
           pairSourceAny(
-            applyValue(downLatch, time),
-            applyValue(upLatch, time)
+            downLatch.applyValue(time),
+            upLatch.applyValue(time)
           )
         )
 
-      val keyValues = mapSource(keyTuples, Keys.from_tuples)
+      val keyValues = keyTuples.map(Keys.from_tuples)
 
       val pause =
-        flatMapSource(
-          pairSourceAny(
-            applyValue(pPress, time),
-            applyValue(focusOut, time)
-          ),
-          applyValue(toAny(pauseLatch), _)
+        pairSourceAny(
+          pPress.applyValue(time),
+          focusOut.applyValue(time)
         )
+          .flatMapSource(
+            toAny(pauseLatch).applyValue(_)
+          )
 
       val directionValidation = toAny(liftWithOutput(validatedCurrentDirection))
 
       val actualDirection =
         assumeInputSource((lastMovedDirection: Option[Direction]) => {
-          flatMapSource(
-            mapSource(keyValues, desiredDirections),
-            desiredDirections => {
-              applyValue(
-                directionValidation,
+          keyValues
+            .map(desiredDirections)
+            .flatMapSource(desiredDirections => {
+              directionValidation.applyValue(
                 (desiredDirections, lastMovedDirection)
               )
-            }
-          )
+            })
         })
 
       // feedbackChannelSource(
@@ -591,62 +587,53 @@ object TutorialApp {
               .getOrElse((None, None, false, 0))
 
           val snakeSource =
-            flatMapSource(
-              applyValue(actualDirection, latchedDirection),
-              direction => {
-                flatMapSource(
-                  applyValue(toAny(tick), (time, (isGameOver, score))),
-                  tick =>
-                    flatMapSource(
-                      latchValue(
-                        Direction(0, 1),
-                        tick.map(_ => direction)
-                      ),
-                      latchedDirection => {
-                        val movementFromTick =
-                          movement(tick, latchedDirection)
+            actualDirection
+              .applyValue(latchedDirection)
+              .flatMapSource(direction => {
+                toAny(tick)
+                  .applyValue((time, (isGameOver, score)))
+                  .flatMapSource(tick =>
+                    latchValue(
+                      Direction(0, 1),
+                      tick.map(_ => direction)
+                    ).flatMapSource(latchedDirection => {
+                      val movementFromTick =
+                        movement(tick, latchedDirection)
 
-                        val snakeMovement = applyPartial(snake(bounds), movementFromTick)
-
-                        flatMapSource(
-                          applyValue(food(bounds), pastSnake),
+                      val snakeMovement = applyPartial(snake(bounds), movementFromTick)
+                      food(bounds)
+                        .applyValue(pastSnake)
+                        .flatMapSource(
                           {
                             case (foodPos, didEatFood) => {
-                              flatMapSource(
-                                applyValue(snakeMovement, didEatFood),
-                                { case (snake, isGameOverCurrent) =>
-                                  flatMapSource(
-                                    applyValue(
-                                      toAny(accumulate(1)),
-                                      didEatFood
-                                    ),
-                                    score => {
-                                      flatMapSource(
-                                        applyValue(toAny(positiveLatch), isGameOverCurrent),
-                                        isGameOver => {
-                                          mapSource(
-                                            pause,
-                                            paused => {
+                              snakeMovement
+                                .applyValue(didEatFood)
+                                .flatMapSource(
+                                  { case (snake, isGameOverCurrent) =>
+                                    toAny(accumulate(1))
+                                      .applyValue(
+                                        didEatFood
+                                      )
+                                      .flatMapSource(score => {
+                                        toAny(positiveLatch)
+                                          .applyValue(isGameOverCurrent)
+                                          .flatMapSource(isGameOver => {
+                                            pause.map(paused => {
                                               (
                                                 (latchedDirection, snake, isGameOver, score),
                                                 (isGameOver, score, snake, foodPos)
                                               )
-                                            }
-                                          )
-                                        }
-                                      )
-                                    }
-                                  )
-                                }
-                              )
+                                            })
+                                          })
+                                      })
+                                  }
+                                )
                             }
                           }
                         )
-                      }
-                    )
-                )
-              }
-            )
+                    })
+                  )
+              })
 
           snakeSource
         })

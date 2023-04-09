@@ -8,17 +8,75 @@ type ReactiveStreamAny[Input, Output] =
 type SourceAny[Output] =
   (Memory) => (Output, Memory)
 
+type OldSource[Memory, Output] =
+  (Option[Memory]) => (Output, (Option[Memory]))
+
+trait Source[Output] extends SourceAny[Output] { self =>
+  def map[T](
+      mapFunc: Output => T
+  ): Source[T] = {
+    def _map(past: Memory): (T, Option[Any]) = {
+      val value = self(past)
+      (mapFunc(value._1), value._2)
+    }
+    toSource(_map)
+  }
+
+  def flatMap[T1, T2](
+      map: Output => Reactive[T1, T2]
+  ): Reactive[T1, T2] = {
+    def _flatMap(
+        argument: T1,
+        past: Memory
+    ): (T2, Memory) = {
+      val (pastValueF: Option[Any], pastValueMapped: Option[Any]) =
+        past.map(_.asInstanceOf[(Option[Any], Option[Any])]) match {
+          case None        => (None, None)
+          case Some(value) => value
+        }
+      val fOutput = self(pastValueF)
+      val mappedFOutput = map(fOutput._1)(argument, pastValueMapped)
+      (mappedFOutput._1, Some(fOutput._2, mappedFOutput._2))
+    }
+    toReactive(_flatMap)
+  }
+
+  def flatMapSource[T1](
+      map: Output => Source[T1]
+  ): Source[T1] = {
+    def _flatMap(
+        past: Memory
+    ): (T1, Memory) = {
+      val (pastValueF: Option[Any], pastValueMapped: Option[Any]) =
+        past.map(_.asInstanceOf[(Option[Any], Option[Any])]) match {
+          case None        => (None, None)
+          case Some(value) => value
+        }
+      val fOutput = self(pastValueF)
+      val mappedFOutput = map(fOutput._1)(pastValueMapped)
+      (mappedFOutput._1, Some(fOutput._2, mappedFOutput._2))
+    }
+    toSource(_flatMap)
+  }
+}
+
+implicit def toSource[Output](
+    f: SourceAny[Output]
+): Source[Output] = new Source[Output]() {
+  def apply(m: Option[Any]) = f(m)
+}
+
 trait Reactive[Input, Output] extends ReactiveStreamAny[Input, Output] { self =>
   def applyValue(
       a: Input
-  ): SourceAny[Output] = {
+  ): Source[Output] = {
     def _apply(
         past: Memory
     ): (Output, Memory) = {
       val value1 = self(a, past)
       value1
     }
-    _apply
+    toSource(_apply)
   }
 
   def map[T](
@@ -28,7 +86,7 @@ trait Reactive[Input, Output] extends ReactiveStreamAny[Input, Output] { self =>
       val value = self(argument, past)
       (mapFunc(value._1), value._2)
     }
-    _map _
+    toReactive(_map)
   }
 
   def flatMap[T1, T2](
@@ -47,6 +105,25 @@ trait Reactive[Input, Output] extends ReactiveStreamAny[Input, Output] { self =>
       val mappedFOutput = map(fOutput._1)(argument._2, pastValueMapped)
       (mappedFOutput._1, Some((fOutput._2, mappedFOutput._2)))
     }
+    toReactive(_flatMap)
+  }
+
+  def flatMapSource[T](
+      map: Output => SourceAny[T]
+  ): Reactive[Input, T] = {
+    def _flatMap(
+        argument: Input,
+        past: Memory
+    ): (T, Memory) = {
+      val (pastValueF: Option[Any], pastValueMapped: Option[Any]) =
+        past.map(_.asInstanceOf[(Option[Any], Option[Any])]) match {
+          case None        => (None, None)
+          case Some(value) => value
+        }
+      val fOutput = self(argument, pastValueF)
+      val mappedFOutput = map(fOutput._1)(pastValueMapped)
+      (mappedFOutput._1, Some(fOutput._2, mappedFOutput._2))
+    }
     _flatMap _
   }
 }
@@ -64,86 +141,16 @@ def toAny[T1, T2, T3](f: ReactiveStream[T1, T2, T3]): Reactive[T2, T3] = {
     val output = f(argument, pastValue)
     (output._1, Some(output._2))
   }
-  _toAny _
+  toReactive(_toAny)
 }
 
-def toSourceAny[T1, T2](f: Source[T1, T2]): SourceAny[T2] = {
+def toSourceAny[T1, T2](f: OldSource[T1, T2]): SourceAny[T2] = {
   def _toAny(pastAny: Memory): (T2, Memory) = {
     val pastValue = pastAny.flatMap(_.asInstanceOf[Option[T1]])
     val output = f(pastValue)
     (output._1, Some(output._2))
   }
   _toAny
-}
-
-def mapSource[T1, T2](
-    f: SourceAny[T1],
-    mapFunc: T1 => T2
-): SourceAny[T2] = {
-  def _map(past: Memory): (T2, Option[Any]) = {
-    val value = f(past)
-    (mapFunc(value._1), value._2)
-  }
-  _map
-}
-
-def flatMapSourceMap[T1, T2, T3](
-    f: Reactive[T1, T2],
-    map: T2 => SourceAny[T3]
-): Reactive[T1, T3] = {
-  def _flatMap(
-      argument: T1,
-      past: Memory
-  ): (T3, Memory) = {
-    val (pastValueF: Option[Any], pastValueMapped: Option[Any]) =
-      past.map(_.asInstanceOf[(Option[Any], Option[Any])]) match {
-        case None        => (None, None)
-        case Some(value) => value
-      }
-    val fOutput = f(argument, pastValueF)
-    val mappedFOutput = map(fOutput._1)(pastValueMapped)
-    (mappedFOutput._1, Some(fOutput._2, mappedFOutput._2))
-  }
-  _flatMap _
-}
-
-def flatMapFromSource[T1, T2, T3](
-    f: SourceAny[T1],
-    map: T1 => Reactive[T2, T3]
-): Reactive[T2, T3] = {
-  def _flatMap(
-      argument: T2,
-      past: Memory
-  ): (T3, Memory) = {
-    val (pastValueF: Option[Any], pastValueMapped: Option[Any]) =
-      past.map(_.asInstanceOf[(Option[Any], Option[Any])]) match {
-        case None        => (None, None)
-        case Some(value) => value
-      }
-    val fOutput = f(pastValueF)
-    val mappedFOutput = map(fOutput._1)(argument, pastValueMapped)
-    (mappedFOutput._1, Some(fOutput._2, mappedFOutput._2))
-  }
-  _flatMap _
-}
-
-def flatMapSource[T1, T2](
-    f: SourceAny[T1],
-    map: T1 => SourceAny[T2]
-): SourceAny[T2] = {
-  def _flatMap(
-      past: Memory
-  ): (T2, Memory) = {
-    val (pastValueF: Option[Any], pastValueMapped: Option[Any]) =
-      past.map(_.asInstanceOf[(Option[Any], Option[Any])]) match {
-        case None        => (None, None)
-        case Some(value) => value
-      }
-    val fOutput = f(pastValueF)
-    val mappedFOutput = map(fOutput._1)(pastValueMapped)
-    (mappedFOutput._1, Some(fOutput._2, mappedFOutput._2))
-  }
-  _flatMap
 }
 
 def flatten[T1, T2, T3](
@@ -438,19 +445,6 @@ def assumeInputSource[T1, T2](
     f(argument)(past)
   }
   _assumeSource _
-}
-
-def applyValue[T1, T2](
-    f1: Reactive[T1, T2],
-    a: T1
-): SourceAny[T2] = {
-  def _apply(
-      past: Memory
-  ): (T2, Memory) = {
-    val value1 = f1(a, past)
-    value1
-  }
-  _apply
 }
 
 def applyPartial[T1, T2, T3](
