@@ -73,24 +73,6 @@ trait Source[Output] extends SourceAny[Output] { self =>
     }
     toSource(_withPastOutput)
   }
-
-  def pair[T](
-      f2: Source[T]
-  ): Source[(Output, T)] = {
-    def _pairCombinator(
-        past: Memory
-    ): ((Output, T), Option[Any]) = {
-      val (pastValueF1: Option[Any], pastValueF2: Option[Any]) =
-        past.map(_.asInstanceOf[(Option[Any], Option[Any])]) match {
-          case None        => (None, None)
-          case Some(value) => value
-        }
-      val value1 = self(pastValueF1)
-      val value2 = f2(pastValueF2)
-      ((value1._1, value2._1), Some((value1._2, value2._2)))
-    }
-    toSource(_pairCombinator)
-  }
 }
 
 implicit def toSource[Output](
@@ -201,25 +183,6 @@ trait Reactive[Input, Output] extends ReactiveStreamAny[Input, Output] { self =>
       ((pastOutput, output._1), Some(output._1, output._2))
     }
     _withPastOutput _
-  }
-
-  def pair[T3, T4](
-      f2: Reactive[T3, T4]
-  ): Reactive[(Input, T3), (Output, T4)] = {
-    def _pairCombinator(
-        argument: (Input, T3),
-        past: Memory
-    ): ((Output, T4), Option[Any]) = {
-      val (pastValueF1: Option[Any], pastValueF2: Option[Any]) =
-        past.map(_.asInstanceOf[(Option[Any], Option[Any])]) match {
-          case None        => (None, None)
-          case Some(value) => value
-        }
-      val value1 = self(argument._1, pastValueF1)
-      val value2 = f2(argument._2, pastValueF2)
-      ((value1._1, value2._1), Some((value1._2, value2._2)))
-    }
-    toReactive(_pairCombinator)
   }
 }
 
@@ -541,6 +504,45 @@ def connect[T1, T2, T3](
     (f2Output._1, Some((f1Output._2, f2Output._2)))
   }
   _connect _
+}
+
+def pair[T1, T2, T3, T4](
+    f1: Reactive[T1, T2],
+    f2: Reactive[T3, T4]
+): Reactive[(T1, T3), (T2, T4)] = {
+  def _pairCombinator(
+      argument: (T1, T3),
+      past: Memory
+  ): ((T2, T4), Option[Any]) = {
+    val (pastValueF1: Option[Any], pastValueF2: Option[Any]) =
+      past.map(_.asInstanceOf[(Option[Any], Option[Any])]) match {
+        case None        => (None, None)
+        case Some(value) => value
+      }
+    val value1 = f1(argument._1, pastValueF1)
+    val value2 = f2(argument._2, pastValueF2)
+    ((value1._1, value2._1), Some((value1._2, value2._2)))
+  }
+  toReactive(_pairCombinator)
+}
+
+def pair[T1, T2](
+    f1: Source[T1],
+    f2: Source[T2]
+): Source[(T1, T2)] = {
+  def _pairCombinator(
+      past: Memory
+  ): ((T1, T2), Option[Any]) = {
+    val (pastValueF1: Option[Any], pastValueF2: Option[Any]) =
+      past.map(_.asInstanceOf[(Option[Any], Option[Any])]) match {
+        case None        => (None, None)
+        case Some(value) => value
+      }
+    val value1 = f1(pastValueF1)
+    val value2 = f2(pastValueF2)
+    ((value1._1, value2._1), Some((value1._2, value2._2)))
+  }
+  toSource(_pairCombinator)
 }
 
 def latch[T1, T2](

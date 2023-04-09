@@ -366,11 +366,11 @@ object TutorialApp {
       release: ReactiveStreamAny[Double, Option[Double]]
   ): ReactiveStreamAny[Double, Option[Double]] = {
     assumeInputSource((time: Double) => {
-      press
-        .applyValue(time)
-        .pair(
-          release.applyValue(time)
-        )
+      pair(
+        press
+          .applyValue(time),
+        release.applyValue(time)
+      )
     })
       .flatMapSource(keyPair => {
         toAny(buttonStateLatch).applyValue(keyPair)
@@ -522,25 +522,27 @@ object TutorialApp {
 
     val resultStream = assumeInputSource((time: Double) => {
       val keyTuples =
-        leftLatch
-          .applyValue(time)
-          .pair(rightLatch.applyValue(time))
-          .pair(
+        pair(
+          pair(
+            leftLatch
+              .applyValue(time),
+            rightLatch.applyValue(time)
+          ),
+          pair(
             downLatch
-              .applyValue(time)
-              .pair(
-                upLatch.applyValue(time)
-              )
+              .applyValue(time),
+            upLatch.applyValue(time)
           )
+        )
 
       val keyValues = keyTuples.map(Keys.from_tuples)
 
       val pause =
-        pPress
-          .applyValue(time)
-          .pair(
-            focusOut.applyValue(time)
-          )
+        pair(
+          pPress
+            .applyValue(time),
+          focusOut.applyValue(time)
+        )
           .flatMapSource(
             toAny(pauseLatch).applyValue(_)
           )
@@ -557,22 +559,6 @@ object TutorialApp {
               )
             })
         })
-
-      // feedbackChannelSource(
-      //   assumeInputSource((input: Option[(Direction, List[Vect2d], Boolean, Int)]) => {
-      //     val (
-      //       latchedDirection: Option[Direction],
-      //       pastSnake: Option[List[Vect2d]],
-      //       isGameOver: Boolean,
-      //       score: Int
-      //     ) =
-      //       input
-      //         .map(value => (Some(value._1), Some(value._2), value._3, value._4))
-      //         .getOrElse((None, None, false, 0))
-
-      //     actualDirection.applyValue(latchedDirection)
-      //   })
-      // )
 
       toAny(tick).applyValue((0, (true, 1)))
 
@@ -612,21 +598,23 @@ object TutorialApp {
                                 .applyValue(didEatFood)
                                 .flatMapSource(
                                   { case (snake, isGameOverCurrent) =>
-                                    toAny(accumulate(1))
-                                      .applyValue(
-                                        didEatFood
-                                      )
-                                      .flatMapSource(score => {
-                                        toAny(positiveLatch)
-                                          .applyValue(isGameOverCurrent)
-                                          .flatMapSource(isGameOver => {
-                                            pause.map(paused => {
-                                              (
-                                                (latchedDirection, snake, isGameOver, score),
-                                                (isGameOver, score, snake, foodPos)
-                                              )
-                                            })
+                                    pair(
+                                      toAny(accumulate(1))
+                                        .applyValue(
+                                          didEatFood
+                                        ),
+                                      toAny(positiveLatch)
+                                        .applyValue(isGameOverCurrent)
+                                    )
+                                      .flatMapSource({
+                                        case (score, isGameOver) => {
+                                          pause.map(paused => {
+                                            (
+                                              (latchedDirection, snake, isGameOver, score),
+                                              (isGameOver, score, snake, foodPos)
+                                            )
                                           })
+                                        }
                                       })
                                   }
                                 )
