@@ -16,6 +16,13 @@ def connect[Input, Intermediate, Output](
     m2: StatefulStream[Intermediate, Output]
 ): StatefulStream[Input, Output] = ConnectedStream(m1, m2)
 
+def merged[InputTop, InputBottom, Intermediate, Output](
+    leftTop: StatefulStream[InputTop, Intermediate],
+    leftBottom: StatefulStream[InputBottom, Intermediate],
+    right: StatefulStream[Intermediate, Output]
+): YMergedStream[InputTop, InputBottom, Intermediate, Output] =
+  YMergedStream(leftTop, leftBottom, right)
+
 class LoopStateMachine[Input, Output](stream: ReactiveStreamAny[Input, Output])
     extends StatefulStream[Input, Output] {
   private var state: Option[Any] = None
@@ -43,6 +50,30 @@ class ConnectedStream[Input, Intermediate, Output](
 
   def clear(): Unit = {
     left.clear()
+    right.clear()
+  }
+}
+
+class YMergedStream[InputTop, InputBottom, Intermediate, Output](
+    leftTop: StatefulStream[InputTop, Intermediate],
+    leftBottom: StatefulStream[InputBottom, Intermediate],
+    right: StatefulStream[Intermediate, Output]
+) {
+  def runTop(input: InputTop): Output = {
+    val leftTopOutput = leftTop.run(input)
+    val output = right.run(leftTopOutput)
+    output
+  }
+
+  def runBottom(input: InputBottom): Output = {
+    val leftBottomOutput = leftBottom.run(input)
+    val output = right.run(leftBottomOutput)
+    output
+  }
+
+  def clear(): Unit = {
+    leftTop.clear()
+    leftBottom.clear()
     right.clear()
   }
 }
