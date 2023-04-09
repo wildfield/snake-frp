@@ -366,10 +366,11 @@ object TutorialApp {
       release: ReactiveStreamAny[Double, Option[Double]]
   ): ReactiveStreamAny[Double, Option[Double]] = {
     assumeInputSource((time: Double) => {
-      pairSource(
-        press.applyValue(time),
-        release.applyValue(time)
-      )
+      press
+        .applyValue(time)
+        .pair(
+          release.applyValue(time)
+        )
     })
       .flatMapSource(keyPair => {
         toAny(buttonStateLatch).applyValue(keyPair)
@@ -521,24 +522,25 @@ object TutorialApp {
 
     val resultStream = assumeInputSource((time: Double) => {
       val keyTuples =
-        pairSource(
-          pairSource(
-            leftLatch.applyValue(time),
-            rightLatch.applyValue(time)
-          ),
-          pairSource(
-            downLatch.applyValue(time),
-            upLatch.applyValue(time)
+        leftLatch
+          .applyValue(time)
+          .pair(rightLatch.applyValue(time))
+          .pair(
+            downLatch
+              .applyValue(time)
+              .pair(
+                upLatch.applyValue(time)
+              )
           )
-        )
 
       val keyValues = keyTuples.map(Keys.from_tuples)
 
       val pause =
-        pairSource(
-          pPress.applyValue(time),
-          focusOut.applyValue(time)
-        )
+        pPress
+          .applyValue(time)
+          .pair(
+            focusOut.applyValue(time)
+          )
           .flatMapSource(
             toAny(pauseLatch).applyValue(_)
           )
