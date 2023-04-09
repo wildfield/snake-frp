@@ -173,9 +173,6 @@ object TutorialApp {
     val (time, (stop, score)) = args
     val accumulatedTime = past.map(_._2).getOrElse(0.0)
     val pastTime = past.map(_._1)
-    Console.out.println(
-      s"time $time stop $stop score $score accumulatedTime $accumulatedTime pastTime $pastTime"
-    )
     pastTime match {
       case Some(pastTime) => {
         val totalAccumulatedTime = (time - pastTime) + accumulatedTime
