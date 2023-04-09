@@ -57,8 +57,8 @@ object TutorialApp {
     events(event) = time
   }
 
-  def getEventTime(event: EventType): () => Option[Double] =
-    () => events.get(event)
+  def getEventTime(event: EventType): Option[Double] =
+    events.get(event)
 
   val start = new Date()
 
@@ -66,10 +66,10 @@ object TutorialApp {
     (new Date()).getTime() - start.getTime()
 
   def didPress(
-      getTime: () => Option[Double]
+      event: EventType
   ): (Double, Option[Double]) => Option[Double] = {
     def _didPress(time: Double, lastTime: Option[Double]): Option[Double] = {
-      val pressedTime = getTime()
+      val pressedTime = getEventTime(event)
       (pressedTime, lastTime) match {
         case (Some(pressedTime), Some(lastTime)) =>
           if (pressedTime >= lastTime) && (pressedTime <= time) then Some(pressedTime) else None
@@ -439,11 +439,11 @@ object TutorialApp {
       })
 
   var didPressRState = create(
-    withPastTime(didPress(getEventTime(EventType.RKeyPress)))
+    withPastTime(didPress(EventType.RKeyPress))
   )
 
   var didFocusInState = create(
-    withPastTime(didPress(getEventTime(EventType.FocusIn)))
+    withPastTime(didPress(EventType.FocusIn))
   )
 
   val drawing =
@@ -489,18 +489,18 @@ object TutorialApp {
   def main(args: Array[String]): Unit = {
     val bounds = Rect(0, 0, canvas.width, canvas.height)
 
-    val upPress = didPress(getEventTime(EventType.UpKeyPress))
-    val downPress = didPress(getEventTime(EventType.DownKeyPress))
-    val leftPress = didPress(getEventTime(EventType.LeftKeyPress))
-    val rightPress = didPress(getEventTime(EventType.RightKeyPress))
+    val upPress = didPress(EventType.UpKeyPress)
+    val downPress = didPress(EventType.DownKeyPress)
+    val leftPress = didPress(EventType.LeftKeyPress)
+    val rightPress = didPress(EventType.RightKeyPress)
 
-    val upRelease = didPress(getEventTime(EventType.UpKeyRelease))
-    val downRelease = didPress(getEventTime(EventType.DownKeyRelease))
-    val leftRelease = didPress(getEventTime(EventType.LeftKeyRelease))
-    val rightRelease = didPress(getEventTime(EventType.RightKeyRelease))
+    val upRelease = didPress(EventType.UpKeyRelease)
+    val downRelease = didPress(EventType.DownKeyRelease)
+    val leftRelease = didPress(EventType.LeftKeyRelease)
+    val rightRelease = didPress(EventType.RightKeyRelease)
 
-    val pPress = didPress(getEventTime(EventType.PKeyPress))
-    val focusOut = didPress(getEventTime(EventType.FocusOut))
+    val pPress = didPress(EventType.PKeyPress)
+    val focusOut = didPress(EventType.FocusOut)
 
     val resultStream = assumeInputSource((time: Double) => {
       val keyTuplesPre = sharedPair(
