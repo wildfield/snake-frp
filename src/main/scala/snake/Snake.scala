@@ -503,22 +503,27 @@ object TutorialApp {
     val focusOut = didPress(getEventTime(EventType.FocusOut))
 
     val resultStream = assumeInputSource((time: Double) => {
-      val keyTuples = identitySource(time)
-        .withPastOutput()
-        .flatMapSource({ case (pastTime: Option[Double], time: Double) =>
-          val up = makeButtonLatch(upPress, upRelease).applyValue((pastTime, time))
-          val down = makeButtonLatch(downPress, downRelease).applyValue((pastTime, time))
-          val left = makeButtonLatch(leftPress, leftRelease).applyValue((pastTime, time))
-          val right = makeButtonLatch(rightPress, rightRelease).applyValue((pastTime, time))
-          pair(pair(left, right), pair(down, up))
-        })
+      val keyTuplesPre = sharedPair(
+        sharedPair(
+          makeButtonLatch(upPress, upRelease),
+          makeButtonLatch(downPress, downRelease)
+        ),
+        sharedPair(
+          makeButtonLatch(leftPress, leftRelease),
+          makeButtonLatch(rightPress, rightRelease)
+        )
+      )
+
+      val keyTuples = repeatPast(time)
+        .flatMapSource { case (pastTime: Option[Double]) =>
+          keyTuplesPre.applyValue((pastTime, time))
+        }
 
       val keyValues = keyTuples.map(Keys.from_tuples)
 
       val pause =
-        identitySource(time)
-          .withPastOutput()
-          .flatMapSource({ case (pastTime: Option[Double], time: Double) =>
+        repeatPast(time)
+          .flatMapSource({ case (pastTime: Option[Double]) =>
             val p = pPress(time, pastTime)
             val out = focusOut(time, pastTime)
             toAny(pauseLatch).applyValue((p, out))

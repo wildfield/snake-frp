@@ -557,6 +557,26 @@ def pair[T1, T2, T3, T4](
   toReactive(_pairCombinator)
 }
 
+def sharedPair[T1, T2, T3](
+    f1: Reactive[T1, T2],
+    f2: Reactive[T1, T3]
+): Reactive[T1, (T2, T3)] = {
+  def _pairCombinator(
+      argument: T1,
+      past: Memory
+  ): ((T2, T3), Option[Any]) = {
+    val (pastValueF1: Option[Any], pastValueF2: Option[Any]) =
+      past.map(_.asInstanceOf[(Option[Any], Option[Any])]) match {
+        case None        => (None, None)
+        case Some(value) => value
+      }
+    val value1 = f1(argument, pastValueF1)
+    val value2 = f2(argument, pastValueF2)
+    ((value1._1, value2._1), Some((value1._2, value2._2)))
+  }
+  toReactive(_pairCombinator)
+}
+
 def pair[T1, T2](
     f1: Source[T1],
     f2: Source[T2]
@@ -646,4 +666,18 @@ def latchSource[T1](
     }
   }
   toSource(_latch)
+}
+
+def repeatPast[Output](input: Output): Source[(Option[Output])] = {
+  def _repeatPast(
+      past: Memory
+  ): (Option[Output], Memory) = {
+    val (pastOutput: Option[Output], pastFValue: Option[Any]) =
+      past.map(_.asInstanceOf[(Output, Option[Any])]) match {
+        case None                 => (None, None)
+        case Some(value1, value2) => (Some(value1), value2)
+      }
+    (pastOutput, Some(input, pastFValue))
+  }
+  toSource(_repeatPast)
 }
