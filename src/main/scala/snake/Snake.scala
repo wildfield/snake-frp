@@ -168,23 +168,30 @@ object TutorialApp {
       past: (Option[(Double, Double)])
   ): (Option[Double], Option[(Double, Double)]) = {
     val (time, (stop, score)) = args
-    val pastTime = past.map(_._1).getOrElse(0.0)
     val accumulatedTime = past.map(_._2).getOrElse(0.0)
-    val totalTime = (time - pastTime) + accumulatedTime
-    val speedupFactor = ((score / 20.0) + 1).min(4)
-    val effectivePulseTime = PULSE_TIME / speedupFactor
-    if (totalTime > effectivePulseTime) {
-      val pulses = (totalTime / effectivePulseTime).toInt
-      val elapsedTime = pulses * effectivePulseTime
-      val newTime = totalTime - elapsedTime
-      if (!stop) {
-        (Some(pulses * SNAKE_SIZE), Some((time, newTime)))
-      } else {
-        (None, Some((time, newTime)))
+    val pastTime = past.map(_._1)
+    pastTime match {
+      case Some(pastTime) => {
+        val totalAccumulatedTime = (time - pastTime) + accumulatedTime
+        val speedupFactor = ((score / 20.0) + 1).min(4)
+        val effectivePulseTime = PULSE_TIME / speedupFactor
+        if (totalAccumulatedTime > effectivePulseTime) {
+          val pulses = (totalAccumulatedTime / effectivePulseTime).toInt
+          val elapsedTime = pulses * effectivePulseTime
+          val newTime = totalAccumulatedTime - elapsedTime
+          if (!stop) {
+            (Some(pulses * SNAKE_SIZE), Some((time, newTime)))
+          } else {
+            (None, Some((time, newTime)))
+          }
+        } else {
+          (None, Some((time, totalAccumulatedTime)))
+        }
       }
-    } else {
-      (None, Some((time, totalTime)))
+      case None =>
+        (None, Some((time, 0)))
     }
+
   }
 
   def validatedCurrentDirection(
@@ -481,7 +488,33 @@ object TutorialApp {
     toAny(didPress(() => this.rPressTime)).map(_.isEmpty)
   )
 
-  var mainState: Option[LoopStateMachine[Double, (Boolean, Int, List[Vect2d], Vect2d)]] = None
+  var didFocusInState = LoopStateMachine(
+    didPress(() => this.focusInTime)
+  )
+
+  val drawing =
+    assumeInputSource(
+      (input: (Option[Double], Boolean, Boolean, Int, List[Vect2d], Vect2d, Int, Boolean)) =>
+        val (tick, isGameOver, paused, score, snake, food, highScore, focusIn) = input
+        toAny(shouldRedraw)
+          .applyValue((tick, paused, isGameOver, focusIn))
+          .map({ shouldRedraw =>
+            if (shouldRedraw) {
+              val bounds = Rect(0, 0, canvas.width, canvas.height)
+              drawClearScreen(bounds) ::: drawFood(food)
+                ::: drawSnake(snake) ::: drawScore(score)
+                ::: drawHighScore(highScore) ::: drawPause(paused) ::: drawGameOver(isGameOver)
+            } else {
+              List()
+            }
+          })
+    )
+  var drawState = LoopStateMachine(drawing)
+
+  var mainState: Option[
+    LoopStateMachine[Double, (Option[Double], Boolean, Boolean, Int, List[Vect2d], Vect2d)]
+  ] =
+    None
   var highScoreState = LoopStateMachine(toAny(keepIfLarger))
 
   def stepsSinceLast(
@@ -611,7 +644,7 @@ object TutorialApp {
                                           pause.map(paused => {
                                             (
                                               (latchedDirection, snake, isGameOver, score),
-                                              (isGameOver, score, snake, foodPos)
+                                              (tick, isGameOver, paused, score, snake, foodPos)
                                             )
                                           })
                                         }
@@ -654,7 +687,7 @@ object TutorialApp {
     //     )
     //   }
     // )
-    // val focusIn = didPress(() => this.focusInTime)
+    //
     // // Inputs: Snake, Food, Score, High Score, Pause, Game Over
     // val draws = flatMapSource(
     //   stateWithHighScore,
@@ -671,13 +704,13 @@ object TutorialApp {
     //         }
     //       ),
     //       shouldRedraw => {
-    //         if (shouldRedraw) {
-    //           drawClearScreen(bounds) ::: drawFood(food)
-    //             ::: drawSnake(snake) ::: drawScore(score)
-    //             ::: drawHighScore(highScore) ::: drawPause(pause) ::: drawGameOver(gameOver)
-    //         } else {
-    //           List()
-    //         }
+    // if (shouldRedraw) {
+    //   drawClearScreen(bounds) ::: drawFood(food)
+    //     ::: drawSnake(snake) ::: drawScore(score)
+    //     ::: drawHighScore(highScore) ::: drawPause(pause) ::: drawGameOver(gameOver)
+    // } else {
+    //   List()
+    // }
     //       }
     //     )
     //   }
@@ -688,17 +721,23 @@ object TutorialApp {
       val (steps, stepTime, pastTime) = stepsSinceLastState.run(time)
       var ops: List[DrawOp] = List()
       for (step <- 0.until(steps)) {
-        mainState match {
-          case None =>
-          case Some(mainState) => {
-            val (isGameOver, score, snake, foodPos) = mainState.run(pastTime + step * stepTime)
-          }
-        }
-
         val didPressR = didPressRState.run(time)
 
         if (didPressR) {
           mainState.foreach { _.clear() }
+        }
+
+        mainState match {
+          case None =>
+          case Some(mainState) => {
+            val (tick, isGameOver, paused, score, snake, foodPos) =
+              mainState.run(pastTime + step * stepTime)
+            val highScore = highScoreState.run(score)
+            val didFocusIn = didFocusInState.run(time).isEmpty
+            ops = drawState.run(
+              (tick, isGameOver, paused, score, snake, foodPos, highScore, didFocusIn)
+            )
+          }
         }
       }
 
@@ -754,8 +793,5 @@ object TutorialApp {
     window.requestAnimationFrame((timestamp: Double) => {
       TutorialApp.onFrame(timestamp, drawOps)
     })
-
-    // //
-    // )
   }
 }
