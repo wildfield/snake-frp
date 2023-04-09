@@ -58,6 +58,21 @@ trait Source[Output] extends SourceAny[Output] { self =>
     }
     toSource(_flatMap)
   }
+
+  def withPastOutput(): Source[(Option[Output], Output)] = {
+    def _withPastOutput(
+        past: Memory
+    ): ((Option[Output], Output), Memory) = {
+      val (pastOutput: Option[Output], pastFValue: Option[Any]) =
+        past.map(_.asInstanceOf[(Output, Option[Any])]) match {
+          case None                 => (None, None)
+          case Some(value1, value2) => (Some(value1), value2)
+        }
+      val output = self(pastFValue)
+      ((pastOutput, output._1), Some(output._1, output._2))
+    }
+    toSource(_withPastOutput)
+  }
 }
 
 implicit def toSource[Output](
@@ -109,7 +124,7 @@ trait Reactive[Input, Output] extends ReactiveStreamAny[Input, Output] { self =>
   }
 
   def flatMapSource[T](
-      map: Output => SourceAny[T]
+      map: Output => Source[T]
   ): Reactive[Input, T] = {
     def _flatMap(
         argument: Input,
@@ -124,7 +139,50 @@ trait Reactive[Input, Output] extends ReactiveStreamAny[Input, Output] { self =>
       val mappedFOutput = map(fOutput._1)(pastValueMapped)
       (mappedFOutput._1, Some(fOutput._2, mappedFOutput._2))
     }
-    _flatMap _
+    toReactive(_flatMap)
+  }
+
+  def clearMem(
+  ): Reactive[(Boolean, Input), Output] = {
+    def _clearMem(
+        argument: (Boolean, Input),
+        past: Memory
+    ): (Output, Memory) = {
+      if (argument._1) {
+        self(argument._2, None)
+      } else {
+        self(argument._2, past)
+      }
+    }
+    toReactive(_clearMem)
+  }
+
+  def ignoreInput[T](
+  ): Reactive[(T, Input), Output] = {
+    def _ignoreInput(
+        argument: (T, Input),
+        past: Memory
+    ): (Output, Memory) = {
+      self(argument._2, past)
+    }
+    toReactive(_ignoreInput)
+  }
+
+  def withPastOutput(
+  ): Reactive[Input, (Option[Output], Output)] = {
+    def _withPastOutput(
+        argument: Input,
+        past: Memory
+    ): ((Option[Output], Output), Memory) = {
+      val (pastOutput: Option[Output], pastFValue: Option[Any]) =
+        past.map(_.asInstanceOf[(Output, Option[Any])]) match {
+          case None                 => (None, None)
+          case Some(value1, value2) => (Some(value1), value2)
+        }
+      val output = self(argument, pastFValue)
+      ((pastOutput, output._1), Some(output._1, output._2))
+    }
+    _withPastOutput _
   }
 }
 
@@ -144,13 +202,13 @@ def toAny[T1, T2, T3](f: ReactiveStream[T1, T2, T3]): Reactive[T2, T3] = {
   toReactive(_toAny)
 }
 
-def toSourceAny[T1, T2](f: OldSource[T1, T2]): SourceAny[T2] = {
+def toSourceAny[T1, T2](f: OldSource[T1, T2]): Source[T2] = {
   def _toAny(pastAny: Memory): (T2, Memory) = {
     val pastValue = pastAny.flatMap(_.asInstanceOf[Option[T1]])
     val output = f(pastValue)
     (output._1, Some(output._2))
   }
-  _toAny
+  toSource(_toAny)
 }
 
 def flatten[T1, T2, T3](
@@ -167,27 +225,6 @@ def flatten[T1, T2, T3](
       }
     val fOutput = f(argument._1, pastValueF)
     val mappedFOutput = fOutput._1(argument._2, pastValueMapped)
-    (mappedFOutput._1, Some((fOutput._2, mappedFOutput._2)))
-  }
-  _flatten _
-}
-
-@targetName("flatten2")
-def flatten[T1, T2, T3, T4](
-    f: Reactive[T1, (T4, Reactive[(T4, T2), T3])]
-): Reactive[(T1, T2), T3] = {
-  def _flatten(
-      argument: (T1, T2),
-      past: Memory
-  ): (T3, Memory) = {
-    val (pastValueF: Option[Any], pastValueMapped: Option[Any]) =
-      past.map(_.asInstanceOf[(Option[Any], Option[Any])]) match {
-        case None        => (None, None)
-        case Some(value) => value
-      }
-    val fOutput = f(argument._1, pastValueF)
-    val mappedFOutput =
-      fOutput._1._2((fOutput._1._1, argument._2), pastValueMapped)
     (mappedFOutput._1, Some((fOutput._2, mappedFOutput._2)))
   }
   _flatten _
@@ -228,34 +265,6 @@ def branch[T1, T2](
     }
   }
   _branch _
-}
-
-def clearMem[T1, T2](
-    f: Reactive[T1, T2]
-): Reactive[(Boolean, T1), T2] = {
-  def _clearMem(
-      argument: (Boolean, T1),
-      past: Memory
-  ): (T2, Memory) = {
-    if (argument._1) {
-      f(argument._2, None)
-    } else {
-      f(argument._2, past)
-    }
-  }
-  _clearMem _
-}
-
-def ignoreInput[T1, T2, T3](
-    f: Reactive[T1, T2]
-): Reactive[(T3, T1), T2] = {
-  def _ignoreInput(
-      argument: (T3, T1),
-      past: Memory
-  ): (T2, Memory) = {
-    f(argument._2, past)
-  }
-  _ignoreInput _
 }
 
 def cached[T1 <: Equals, T2](
@@ -318,41 +327,6 @@ def ifInputChanged[T1 <: Equals, T2](
   _ifInputChanged _
 }
 
-def withPastOutput[T1, T2](
-    f: Reactive[T1, T2]
-): Reactive[T1, (Option[T2], T2)] = {
-  def _withPastOutput(
-      argument: T1,
-      past: Memory
-  ): ((Option[T2], T2), Memory) = {
-    val (pastOutput: Option[T2], pastFValue: Option[Any]) =
-      past.map(_.asInstanceOf[(T2, Option[Any])]) match {
-        case None                 => (None, None)
-        case Some(value1, value2) => (Some(value1), value2)
-      }
-    val output = f(argument, pastFValue)
-    ((pastOutput, output._1), Some(output._1, output._2))
-  }
-  _withPastOutput _
-}
-
-def withPastOutputSource[T1](
-    f: SourceAny[T1]
-): SourceAny[(Option[T1], T1)] = {
-  def _withPastOutput(
-      past: Memory
-  ): ((Option[T1], T1), Memory) = {
-    val (pastOutput: Option[T1], pastFValue: Option[Any]) =
-      past.map(_.asInstanceOf[(T1, Option[Any])]) match {
-        case None                 => (None, None)
-        case Some(value1, value2) => (Some(value1), value2)
-      }
-    val output = f(pastFValue)
-    ((pastOutput, output._1), Some(output._1, output._2))
-  }
-  _withPastOutput
-}
-
 def feedback[T1, T2](
     f: Reactive[(Option[T2], T1), T2]
 ): Reactive[T1, T2] = {
@@ -373,7 +347,7 @@ def feedback[T1, T2](
 
 def feedbackSource[T2](
     f: Reactive[Option[T2], T2]
-): SourceAny[T2] = {
+): Source[T2] = {
   def _feedbackSource(
       past: Memory
   ): (T2, Memory) = {
@@ -385,7 +359,7 @@ def feedbackSource[T2](
     val output = f(pastOutput, pastFValue)
     (output._1, Some(output._1, output._2))
   }
-  _feedbackSource
+  toSource(_feedbackSource)
 }
 
 def feedbackChannel[T1, T2, T3](
@@ -403,12 +377,12 @@ def feedbackChannel[T1, T2, T3](
     val output = f((pastOutput, argument), pastFValue)
     (output._1._2, Some(output._1._1, output._2))
   }
-  _feedbackSource _
+  toReactive(_feedbackSource)
 }
 
 def feedbackChannelSource[T2, T3](
     f: Reactive[Option[T2], (T2, T3)]
-): SourceAny[T3] = {
+): Source[T3] = {
   def _feedbackSource(
       past: Memory
   ): (T3, Memory) = {
@@ -420,7 +394,7 @@ def feedbackChannelSource[T2, T3](
     val output = f(pastOutput, pastFValue)
     (output._1._2, Some(output._1._1, output._2))
   }
-  _feedbackSource
+  toSource(_feedbackSource)
 }
 
 def assumeInput[T1, T2, T3](
@@ -436,7 +410,7 @@ def assumeInput[T1, T2, T3](
 }
 
 def assumeInputSource[T1, T2](
-    f: T1 => SourceAny[T2]
+    f: T1 => Source[T2]
 ): Reactive[T1, T2] = {
   def _assumeSource(
       argument: T1,
@@ -476,8 +450,8 @@ def applyPartial2[T1, T2, T3](
 }
 
 def detectChange[T1 <: Equals](
-    f: SourceAny[T1]
-): SourceAny[(Boolean, T1)] = {
+    f: Source[T1]
+): Source[(Boolean, T1)] = {
   def _detectChange(
       past: Memory
   ): ((Boolean, T1), Option[Any]) = {
@@ -490,7 +464,7 @@ def detectChange[T1 <: Equals](
     val didOutputChange = pastOutput.map(_.equals(output._1)).getOrElse(true)
     ((didOutputChange, output._1), Some(output._1, output._2))
   }
-  _detectChange
+  toSource(_detectChange)
 }
 
 def identity[T1](): Reactive[T1, T1] = {
@@ -500,16 +474,16 @@ def identity[T1](): Reactive[T1, T1] = {
   ): (T1, Memory) = {
     (argument, past)
   }
-  _identity _
+  toReactive(_identity)
 }
 
-def identitySource[T1](value: T1): SourceAny[T1] = {
+def identitySource[T1](value: T1): Source[T1] = {
   def _identity(
       past: Memory
   ): (T1, Memory) = {
     (value, past)
   }
-  _identity
+  toSource(_identity)
 }
 
 def connect[T1, T2, T3](
@@ -552,10 +526,10 @@ def pairAny[T1, T2, T3, T4](
   _pairCombinator _
 }
 
-def pairSourceAny[T1, T2](
-    f1: SourceAny[T1],
-    f2: SourceAny[T2]
-): SourceAny[(T1, T2)] = {
+def pairSource[T1, T2](
+    f1: Source[T1],
+    f2: Source[T2]
+): Source[(T1, T2)] = {
   def _pairCombinator(
       past: Memory
   ): ((T1, T2), Option[Any]) = {
@@ -568,7 +542,7 @@ def pairSourceAny[T1, T2](
     val value2 = f2(pastValueF2)
     ((value1._1, value2._1), Some((value1._2, value2._2)))
   }
-  _pairCombinator
+  toSource(_pairCombinator)
 }
 
 def latch[T1, T2](
@@ -593,13 +567,13 @@ def latch[T1, T2](
         }
     }
   }
-  _latch _
+  toReactive(_latch)
 }
 
 def latchValue[T1](
     defaultValue: T1,
     value: Option[T1]
-): SourceAny[T1] = {
+): Source[T1] = {
   def _latch(
       past: Memory
   ): (T1, Option[Any]) = {
@@ -616,13 +590,13 @@ def latchValue[T1](
         }
     }
   }
-  _latch
+  toSource(_latch)
 }
 
 def latchSource[T1](
     defaultValue: T1,
-    f1: SourceAny[Option[T1]]
-): SourceAny[T1] = {
+    f1: Source[Option[T1]]
+): Source[T1] = {
   def _latch(
       past: Memory
   ): (T1, Option[Any]) = {
@@ -640,5 +614,5 @@ def latchSource[T1](
         }
     }
   }
-  _latch
+  toSource(_latch)
 }
