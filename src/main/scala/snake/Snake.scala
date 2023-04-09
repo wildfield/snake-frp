@@ -321,7 +321,7 @@ object TutorialApp {
         }
       }
     }
-    map(toAny(liftWithOutput(_snake)), (output) => (output._1, output._2))
+    toAny(liftWithOutput(_snake)).map((output) => (output._1, output._2))
   }
 
   def food(bounds: Rect): ReactiveStreamAny[
@@ -368,12 +368,12 @@ object TutorialApp {
     flatMapSourceMap(
       assumeInputSource((time: Double) => {
         pairSourceAny(
-          apply(press, time),
-          apply(release, time)
+          applyValue(press, time),
+          applyValue(release, time)
         )
       }),
       keyPair => {
-        apply(toAny(buttonStateLatch), keyPair)
+        applyValue(toAny(buttonStateLatch), keyPair)
       }
     )
   }
@@ -479,10 +479,7 @@ object TutorialApp {
   }
 
   var didPressRState = LoopStateMachine(
-    map(
-      toAny(didPress(() => this.rPressTime)),
-      _.isEmpty
-    )
+    toAny(didPress(() => this.rPressTime)).map(_.isEmpty)
   )
 
   var mainState: Option[LoopStateMachine[Double, (Boolean, Int, List[Vect2d], Vect2d)]] = None
@@ -528,12 +525,12 @@ object TutorialApp {
       val keyTuples =
         pairSourceAny(
           pairSourceAny(
-            apply(leftLatch, time),
-            apply(rightLatch, time)
+            applyValue(leftLatch, time),
+            applyValue(rightLatch, time)
           ),
           pairSourceAny(
-            apply(downLatch, time),
-            apply(upLatch, time)
+            applyValue(downLatch, time),
+            applyValue(upLatch, time)
           )
         )
 
@@ -542,10 +539,10 @@ object TutorialApp {
       val pause =
         flatMapSource(
           pairSourceAny(
-            apply(pPress, time),
-            apply(focusOut, time)
+            applyValue(pPress, time),
+            applyValue(focusOut, time)
           ),
-          apply(toAny(pauseLatch), _)
+          applyValue(toAny(pauseLatch), _)
         )
 
       val directionValidation = toAny(liftWithOutput(validatedCurrentDirection))
@@ -555,13 +552,31 @@ object TutorialApp {
           flatMapSource(
             mapSource(keyValues, desiredDirections),
             desiredDirections => {
-              apply(
+              applyValue(
                 directionValidation,
                 (desiredDirections, lastMovedDirection)
               )
             }
           )
         })
+
+      // feedbackChannelSource(
+      //   assumeInputSource((input: Option[(Direction, List[Vect2d], Boolean, Int)]) => {
+      //     val (
+      //       latchedDirection: Option[Direction],
+      //       pastSnake: Option[List[Vect2d]],
+      //       isGameOver: Boolean,
+      //       score: Int
+      //     ) =
+      //       input
+      //         .map(value => (Some(value._1), Some(value._2), value._3, value._4))
+      //         .getOrElse((None, None, false, 0))
+
+      //     actualDirection.applyValue(latchedDirection)
+      //   })
+      // )
+
+      toAny(tick).applyValue((0, (true, 1)))
 
       feedbackChannelSource(
         assumeInputSource((input: Option[(Direction, List[Vect2d], Boolean, Int)]) => {
@@ -577,10 +592,10 @@ object TutorialApp {
 
           val snakeSource =
             flatMapSource(
-              apply(actualDirection, latchedDirection),
+              applyValue(actualDirection, latchedDirection),
               direction => {
                 flatMapSource(
-                  apply(toAny(tick), (time, (isGameOver, score))),
+                  applyValue(toAny(tick), (time, (isGameOver, score))),
                   tick =>
                     flatMapSource(
                       latchValue(
@@ -594,20 +609,20 @@ object TutorialApp {
                         val snakeMovement = applyPartial(snake(bounds), movementFromTick)
 
                         flatMapSource(
-                          apply(food(bounds), pastSnake),
+                          applyValue(food(bounds), pastSnake),
                           {
                             case (foodPos, didEatFood) => {
                               flatMapSource(
-                                apply(snakeMovement, didEatFood),
+                                applyValue(snakeMovement, didEatFood),
                                 { case (snake, isGameOverCurrent) =>
                                   flatMapSource(
-                                    apply(
+                                    applyValue(
                                       toAny(accumulate(1)),
                                       didEatFood
                                     ),
                                     score => {
                                       flatMapSource(
-                                        apply(toAny(positiveLatch), isGameOverCurrent),
+                                        applyValue(toAny(positiveLatch), isGameOverCurrent),
                                         isGameOver => {
                                           mapSource(
                                             pause,
