@@ -488,11 +488,11 @@ object TutorialApp {
         }
       })
 
-  var didPressRState = LoopStateMachine(
+  var didPressRState = create(
     withPastTime(didPress(() => this.rPressTime))
   )
 
-  var didFocusInState = LoopStateMachine(
+  var didFocusInState = create(
     withPastTime(didPress(() => this.focusInTime))
   )
 
@@ -515,13 +515,13 @@ object TutorialApp {
             }
           })
     )
-  var drawState = LoopStateMachine(drawing)
+  var drawState = create(drawing)
 
   var mainState: Option[
-    LoopStateMachine[Double, (Option[Double], Boolean, Boolean, Int, List[Vect2d], Vect2d)]
+    StatefulStream[Double, (Option[Double], Boolean, Boolean, Int, List[Vect2d], Vect2d)]
   ] =
     None
-  var highScoreState = LoopStateMachine(toAny(keepIfLarger))
+  var highScoreState = create(toAny(keepIfLarger))
 
   def stepsSinceLast(
       time: Double,
@@ -534,7 +534,7 @@ object TutorialApp {
     ((steps, stepTime, pastTime), Some(pastTime + stepTime * steps))
   }
 
-  var stepsSinceLastState = LoopStateMachine(toAny(stepsSinceLast))
+  var stepsSinceLastState = create(toAny(stepsSinceLast))
 
   def main(args: Array[String]): Unit = {
     val bounds = Rect(0, 0, canvas.width, canvas.height)
@@ -653,7 +653,7 @@ object TutorialApp {
       )
     })
 
-    mainState = Some(LoopStateMachine(resultStream))
+    mainState = Some(create(resultStream))
 
     val drawOps = (time: Double) => {
       val (steps, stepTime, pastTime) = stepsSinceLastState.run(time)
