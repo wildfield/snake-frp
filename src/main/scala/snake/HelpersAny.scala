@@ -311,6 +311,23 @@ def withPastOutput[T1, T2](
   _withPastOutput
 }
 
+def withPastOutputSource[T1](
+    f: SourceAny[T1]
+): SourceAny[(Option[T1], T1)] = {
+  def _withPastOutput(
+      past: Memory
+  ): ((Option[T1], T1), Memory) = {
+    val (pastOutput: Option[T1], pastFValue: Option[Any]) =
+      past.map(_.asInstanceOf[(T1, Option[Any])]) match {
+        case None                 => (None, None)
+        case Some(value1, value2) => (Some(value1), value2)
+      }
+    val output = f(pastFValue)
+    ((pastOutput, output._1), Some(output._1, output._2))
+  }
+  _withPastOutput
+}
+
 def feedback[T1, T2](
     f: ReactiveStreamAny[(Option[T2], T1), T2]
 ): ReactiveStreamAny[T1, T2] = {

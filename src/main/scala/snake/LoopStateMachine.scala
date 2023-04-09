@@ -8,4 +8,8 @@ class LoopStateMachine[Input, Output](stream: ReactiveStreamAny[Input, Output]) 
     state = newState
     output
   }
+
+  def clear(): Unit = {
+    state = None
+  }
 }
