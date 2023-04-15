@@ -428,6 +428,41 @@ def feedbackChannelSource[T2, T3](
   toSource(_feedbackSource)
 }
 
+def feedbackSourceFlatMap[T2](
+    fMap: Option[T2] => Source[T2]
+): Source[T2] = {
+  def _mapWithFeedback(
+      past: Memory
+  ): (T2, Memory) = {
+    val (pastOutput: Option[T2], pastFValue: Option[Any]) =
+      past.map(_.asInstanceOf[(T2, Option[Any])]) match {
+        case None                 => (None, None)
+        case Some(value1, value2) => (Some(value1), value2)
+      }
+    val output = fMap(pastOutput)(pastFValue)
+    (output._1, Some(output._1, output._2))
+  }
+  toSource(_mapWithFeedback)
+}
+
+def feedbackSelectSourceFlatMap[T2, T3](
+    fMap: Option[T2] => Source[T3],
+    selectMap: T3 => T2
+): Source[T3] = {
+  def _mapWithFeedback(
+      past: Memory
+  ): (T3, Memory) = {
+    val (pastOutput: Option[T2], pastFValue: Option[Any]) =
+      past.map(_.asInstanceOf[(T2, Option[Any])]) match {
+        case None                 => (None, None)
+        case Some(value1, value2) => (Some(value1), value2)
+      }
+    val output = fMap(pastOutput)(pastFValue)
+    (output._1, Some(selectMap(output._1), output._2))
+  }
+  toSource(_mapWithFeedback)
+}
+
 def assumeInput[T1, T2, T3](
     f: T1 => Reactive[T2, T3]
 ): Reactive[(T1, T2), T3] = {
