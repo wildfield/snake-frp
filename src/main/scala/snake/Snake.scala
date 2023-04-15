@@ -555,38 +555,19 @@ object TutorialApp {
             )
             .getOrElse((None, None, None, false, 0))
 
-        val snakeInfo = assumeIdentity[Double]
-          .connectRightSource(
-            actualDirection
-              .applyValue(pastDirection)
-          )
-          .rightChannelExtend { case (tick: Double, direction: Direction) =>
+        def snakeInfo(direction: Direction) = assumeIdentity[Double]
+          .map { case (tick: Double) =>
             movement(tick, direction)
           }
           .connectLeft(snakeWithFood)
           .map {
             case (
                   (pastSnake: List[Vect2d], food: Vect2d, didEatFood: Boolean),
-                  ((_, direction: Direction), delta: Vect2d)
+                  (delta: Vect2d)
                 ) =>
               val (snakePos, isGameOver) = snake(bounds, delta, didEatFood, pastSnake)
               (food, snakePos, didEatFood, isGameOver, direction)
           }
-          .cachedIfNoInput()
-
-        val gameInfo = applyPartial(
-          withDefaultOutput(
-            (DEFAULT_FOOD, DEFAULT_SNAKE, false, false, Direction(0, 1)),
-            snakeInfo
-          )
-            .inputMap((input: ((Option[List[Vect2d]], Option[Vect2d]), Option[Double])) =>
-              input match {
-                case ((Some(snake), Some(food)), Some(tick)) => Some(((snake, food), tick))
-                case _                                       => None
-              }
-            ),
-          (pastSnake, pastFood)
-        )
           .rightChannelExtendSource {
             case (_, _, didEatFood, isGameOver, _) => {
               pair(
@@ -599,6 +580,23 @@ object TutorialApp {
               )
             }
           }
+          .cachedIfNoInput()
+
+        val gameInfo = applyPartial(
+          withDefaultOutput(
+            ((DEFAULT_FOOD, DEFAULT_SNAKE, false, false, Direction(0, 1)), (0, false)),
+            actualDirection
+              .applyValue(pastDirection)
+              .flatMap(snakeInfo(_))
+          )
+            .inputMap((input: ((Option[List[Vect2d]], Option[Vect2d]), Option[Double])) =>
+              input match {
+                case ((Some(snake), Some(food)), Some(tick)) => Some(((snake, food), tick))
+                case _                                       => None
+              }
+            ),
+          (pastSnake, pastFood)
+        )
 
         pause
           .rightChannelExtendSource(paused =>
