@@ -467,8 +467,18 @@ object TutorialApp {
     )
   var drawState = create(drawing)
 
+  case class GameState(
+      direction: Direction,
+      tick: Option[Double],
+      isGameOver: Boolean,
+      paused: Boolean,
+      score: Int,
+      snake: List[Vect2d],
+      foodPos: Vect2d
+  )
+
   var mainState: Option[
-    StatefulStream[Double, (Option[Double], Boolean, Boolean, Int, List[Vect2d], Vect2d)]
+    StatefulStream[Double, GameState]
   ] =
     None
   var highScoreState = create(toAny(keepIfLarger))
@@ -542,7 +552,7 @@ object TutorialApp {
             })
         })
 
-      feedbackChannelSourceFlatMap((input: Option[(Direction, List[Vect2d], Boolean, Int)]) => {
+      feedbackSourceFlatMap((input: Option[GameState]) => {
         val (
           latchedDirection: Option[Direction],
           pastSnake: Option[List[Vect2d]],
@@ -550,7 +560,7 @@ object TutorialApp {
           score: Int
         ) =
           input
-            .map(value => (Some(value._1), Some(value._2), value._3, value._4))
+            .map(value => (Some(value.direction), Some(value.snake), value.isGameOver, value.score))
             .getOrElse((None, None, false, 0))
 
         pause
@@ -586,9 +596,14 @@ object TutorialApp {
                                 )
                                   .map({
                                     case (score, isGameOver) => {
-                                      (
-                                        (latchedDirection, snake, isGameOver, score),
-                                        (tick, isGameOver, paused, score, snake, foodPos)
+                                      GameState(
+                                        latchedDirection,
+                                        tick,
+                                        isGameOver,
+                                        paused,
+                                        score,
+                                        snake,
+                                        foodPos
                                       )
                                     }
                                   })
@@ -600,7 +615,6 @@ object TutorialApp {
                 )
               })
           })
-
       })
     })
 
@@ -619,12 +633,21 @@ object TutorialApp {
         mainState match {
           case None =>
           case Some(mainState) => {
-            val (tick, isGameOver, paused, score, snake, foodPos) =
+            val gameState =
               mainState.run(pastTime + step * stepTime)
-            val highScore = highScoreState.run(score)
+            val highScore = highScoreState.run(gameState.score)
             val didFocusIn = !didFocusInState.run(time).isEmpty
             ops = drawState.run(
-              (tick, isGameOver, paused, score, snake, foodPos, highScore, didFocusIn)
+              (
+                gameState.tick,
+                gameState.isGameOver,
+                gameState.paused,
+                gameState.score,
+                gameState.snake,
+                gameState.foodPos,
+                highScore,
+                didFocusIn
+              )
             )
           }
         }
