@@ -944,3 +944,20 @@ def repeatPast[Output](input: Output): Source[(Option[Output])] = {
   }
   toSource(_repeatPast)
 }
+
+def feedbackSourceMap[T2](
+    fMap: Option[T2] => T2
+): Source[T2] = {
+  def _mapWithFeedback(
+      past: Memory
+  ): (T2, Memory) = {
+    val (pastOutput: Option[T2], pastFValue: Option[Any]) =
+      past.map(_.asInstanceOf[(T2, Option[Any])]) match {
+        case None                 => (None, None)
+        case Some(value1, value2) => (Some(value1), value2)
+      }
+    val output = fMap(pastOutput)
+    (output, Some(output, pastFValue))
+  }
+  toSource(_mapWithFeedback)
+}
