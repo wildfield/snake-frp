@@ -74,6 +74,11 @@ trait Source[Output] extends SourceAny[Output] { self =>
     }
     toSource(_withPastOutput)
   }
+
+  def rightChannelExtendSource[T1](
+      f: (Output) => Source[T1]
+  ): Source[(Output, T1)] =
+    self.flatMapSource(output => f(output).map((output, _)))
 }
 
 implicit def toSource[Output](
@@ -127,7 +132,7 @@ trait Reactive[Input, Output] extends ReactiveStreamAny[Input, Output] { self =>
   def flatMapSource[T](
       map: Output => Source[T]
   ): Reactive[Input, T] = {
-    def _flatMap(
+    def _flatMapSource(
         argument: Input,
         past: Memory
     ): (T, Memory) = {
@@ -140,7 +145,7 @@ trait Reactive[Input, Output] extends ReactiveStreamAny[Input, Output] { self =>
       val mappedFOutput = map(fOutput._1)(pastValueMapped)
       (mappedFOutput._1, Some(fOutput._2, mappedFOutput._2))
     }
-    toReactive(_flatMap)
+    toReactive(_flatMapSource)
   }
 
   def clearMem(
@@ -183,9 +188,194 @@ trait Reactive[Input, Output] extends ReactiveStreamAny[Input, Output] { self =>
       val output = self(argument, pastFValue)
       ((pastOutput, output._1), Some(output._1, output._2))
     }
-    _withPastOutput _
+    toReactive(_withPastOutput)
   }
+
+  def inputMap[T1](
+      mapF: (T1) => Input
+  ): Reactive[T1, Output] = {
+    def _inputMap(
+        argument: T1,
+        past: Memory
+    ): (Output, Memory) = {
+      self(mapF(argument), past)
+    }
+    toReactive(_inputMap)
+  }
+
+  def inputMapSource[T1](
+      mapF: (T1) => Source[Input]
+  ): Reactive[T1, Output] = {
+    def _inputMap(
+        argument: T1,
+        past: Memory
+    ): (Output, Memory) = {
+      val (pastSource: Memory, pastMemory: Memory) =
+        past.flatMap(_.asInstanceOf[Option[(Memory, Memory)]]) match {
+          case None                            => (None, None)
+          case Some((sourceValue, pastMemory)) => (sourceValue, pastMemory)
+        }
+      val sourceOutput = mapF(argument)(pastSource)
+      val output = self(sourceOutput._1, pastMemory)
+      (output._1, Some(sourceOutput._2, output._2))
+    }
+    toReactive(_inputMap)
+  }
+
+  def inputFlatMap[T1, T2](
+      mapF: (T1) => Reactive[T2, Input]
+  ): Reactive[(T1, T2), Output] = {
+    def _inputFlatMap(
+        argument: (T1, T2),
+        past: Memory
+    ): (Output, Memory) = {
+      val (pastMapped: Memory, pastMemory: Memory) =
+        past.flatMap(_.asInstanceOf[Option[(Memory, Memory)]]) match {
+          case None                           => (None, None)
+          case Some((pastMapped, pastMemory)) => (pastMapped, pastMemory)
+        }
+      val mappedOutput = mapF(argument._1)(argument._2, pastMapped)
+      val output = self(mappedOutput._1, pastMemory)
+      (output._1, Some(mappedOutput._2, output._2))
+    }
+    toReactive(_inputFlatMap)
+  }
+
+  def withDefaultInput(
+      default: Input
+  ): Reactive[Option[Input], Output] =
+    self.inputMap((value: Option[Input]) => value.getOrElse(default))
+
+  def cachedIfNoInput(): Reactive[Option[Input], Option[Output]] = {
+    def _cachedIfNoInput(
+        argument: Option[Input],
+        past: Memory
+    ): (Option[Output], Memory) = {
+      val (pastOutput: Option[Output], pastMemory: Option[Any]) =
+        past.map(_.asInstanceOf[(Option[Output], Option[Any])]) match {
+          case None                 => (None, None)
+          case Some(value1, value2) => (value1, value2)
+        }
+      argument match {
+        case None => (pastOutput, Some(pastOutput, pastMemory))
+        case Some(argument) =>
+          val output = self(argument, pastMemory)
+          (Some(output._1), Some(Some(output._1), output._2))
+      }
+    }
+    toReactive(_cachedIfNoInput)
+  }
+
+  def cachedChannel(): Reactive[(Boolean, Input), Option[Output]] = {
+    def _cachedChannel(
+        argument: (Boolean, Input),
+        past: Memory
+    ): (Option[Output], Memory) = {
+      val (pastOutput: Option[Output], pastMemory: Option[Any]) =
+        past.map(_.asInstanceOf[(Output, Option[Any])]) match {
+          case None                 => (None, None)
+          case Some(value1, value2) => (Some(value1), value2)
+        }
+      val (shouldReturnCached, input) = argument
+      if (shouldReturnCached) {
+        (pastOutput, Some(pastOutput, pastMemory))
+      } else {
+        val output = self(input, pastMemory)
+        (Some(output._1), Some(output._1, output._2))
+      }
+    }
+    toReactive(_cachedChannel)
+  }
+
+  def cachedChannelIfCached(): Reactive[(Boolean, Input), Output] = {
+    def _cachedChannel(
+        argument: (Boolean, Input),
+        past: Memory
+    ): (Output, Memory) = {
+      val (pastOutput: Option[Output], pastMemory: Option[Any]) =
+        past.map(_.asInstanceOf[(Output, Option[Any])]) match {
+          case None                 => (None, None)
+          case Some(value1, value2) => (Some(value1), value2)
+        }
+      val (shouldReturnCached, input) = argument
+      (shouldReturnCached, pastOutput) match {
+        case (true, Some(pastOutput)) => (pastOutput, Some(pastOutput, pastMemory))
+        case _ => {
+          val output = self(input, pastMemory)
+          (output._1, Some(output._1, output._2))
+        }
+      }
+    }
+    toReactive(_cachedChannel)
+  }
+
+  def leftChannelExtendSource[T1](
+      f: (Output) => Source[T1]
+  ): Reactive[Input, (T1, Output)] =
+    self.flatMapSource(output => f(output).map((_, output)))
+
+  def leftChannelExtend[T1](
+      f: (Output) => T1
+  ): Reactive[Input, (T1, Output)] =
+    self.map(output => (f(output), output))
+
+  def leftChannelMap[T1, T2](
+      mapF: T1 => T2
+  ): Reactive[(T1, Input), (T2, Output)] = {
+    def _leftChannelMap(
+        argument: (T1, Input),
+        past: Memory
+    ): ((T2, Output), Memory) = {
+      val output = self(argument._2, past)
+      ((mapF(argument._1), output._1), Some(output._2))
+    }
+    toReactive(_leftChannelMap)
+  }
+
+  def rightChannelExtendSource[T1](
+      f: (Output) => Source[T1]
+  ): Reactive[Input, (Output, T1)] =
+    self.flatMapSource(output => f(output).map((output, _)))
+
+  def rightChannelExtend[T1](
+      f: (Output) => T1
+  ): Reactive[Input, (Output, T1)] =
+    self.map(output => (output, f(output)))
+
+  def assumeLeftInput[T1]: Reactive[(T1, Input), (T1, Output)] =
+    assumeIdentity[T1].flatMap(input => self.map((input, _)))
+
+  def assumeRightInput[T1]: Reactive[(Input, T1), (Output, T1)] =
+    assumeIdentity[T1]
+      .flatMap(input => self.map((_, input)))
+      .inputMap { case (t1, input) => (input, t1) }
+
+  def connectLeft[T1, T2](
+      f: Reactive[T1, T2]
+  ): Reactive[(T1, Input), (T2, Output)] =
+    pair(f, self)
+
+  def connectLeftSource[T1](
+      f: Source[T1]
+  ): Reactive[Input, (T1, Output)] =
+    self.flatMapSource(output => f.map((_, output)))
+
+  def connectRight[T1, T2](
+      f: Reactive[T1, T2]
+  ): Reactive[(Input, T1), (Output, T2)] =
+    pair(self, f)
+
+  def connectRightSource[T1](
+      f: Source[T1]
+  ): Reactive[Input, (Output, T1)] =
+    self.flatMapSource(output => f.map((output, _)))
 }
+
+def withDefaultOutput[Input, Output](
+    default: Output,
+    f: Reactive[Input, Option[Output]]
+): Reactive[Input, Output] =
+  f.map((value: Option[Output]) => value.getOrElse(default))
 
 implicit def toReactive[Input, Output](
     f: ReactiveStreamAny[Input, Output]
@@ -428,6 +618,58 @@ def feedbackChannelSource[T2, T3](
   toSource(_feedbackSource)
 }
 
+def feedbackChannelSourceFlatMap[T1, T2](
+    fMap: Option[T1] => Source[(T1, T2)]
+): Source[T2] = {
+  def _mapWithFeedback(
+      past: Memory
+  ): (T2, Memory) = {
+    val (pastOutput: Option[T1], pastFValue: Option[Any]) =
+      past.map(_.asInstanceOf[(T1, Option[Any])]) match {
+        case None                 => (None, None)
+        case Some(value1, value2) => (Some(value1), value2)
+      }
+    val output = fMap(pastOutput)(pastFValue)
+    (output._1._2, Some(output._1._1, output._2))
+  }
+  toSource(_mapWithFeedback)
+}
+
+def feedbackSourceFlatMap[T2](
+    fMap: Option[T2] => Source[T2]
+): Source[T2] = {
+  def _mapWithFeedback(
+      past: Memory
+  ): (T2, Memory) = {
+    val (pastOutput: Option[T2], pastFValue: Option[Any]) =
+      past.map(_.asInstanceOf[(T2, Option[Any])]) match {
+        case None                 => (None, None)
+        case Some(value1, value2) => (Some(value1), value2)
+      }
+    val output = fMap(pastOutput)(pastFValue)
+    (output._1, Some(output._1, output._2))
+  }
+  toSource(_mapWithFeedback)
+}
+
+def feedbackSelectSourceFlatMap[T2, T3](
+    fMap: Option[T2] => Source[T3],
+    selectMap: T3 => T2
+): Source[T3] = {
+  def _mapWithFeedback(
+      past: Memory
+  ): (T3, Memory) = {
+    val (pastOutput: Option[T2], pastFValue: Option[Any]) =
+      past.map(_.asInstanceOf[(T2, Option[Any])]) match {
+        case None                 => (None, None)
+        case Some(value1, value2) => (Some(value1), value2)
+      }
+    val output = fMap(pastOutput)(pastFValue)
+    (output._1, Some(selectMap(output._1), output._2))
+  }
+  toSource(_mapWithFeedback)
+}
+
 def assumeInput[T1, T2, T3](
     f: T1 => Reactive[T2, T3]
 ): Reactive[(T1, T2), T3] = {
@@ -452,6 +694,28 @@ def assumeInputSource[T1, T2](
   toReactive(_assumeSource)
 }
 
+def assumeInputMap[T1, T2](
+    f: T1 => T2
+): Reactive[T1, T2] = {
+  def _assumeInputMap(
+      argument: T1,
+      past: Memory
+  ): (T2, Memory) = {
+    (f(argument), None)
+  }
+  toReactive(_assumeInputMap)
+}
+
+def assumeIdentity[T1]: Reactive[T1, T1] = {
+  def _assumeIdentity(
+      argument: T1,
+      past: Memory
+  ): (T1, Memory) = {
+    (argument, past)
+  }
+  toReactive(_assumeIdentity)
+}
+
 def applyPartial[T1, T2, T3](
     f1: Reactive[(T1, T2), T3],
     a: T1
@@ -460,8 +724,7 @@ def applyPartial[T1, T2, T3](
       argument: T2,
       past: Memory
   ): (T3, Memory) = {
-    val value1 = f1((a, argument), past)
-    value1
+    f1((a, argument), past)
   }
   toReactive(_apply)
 }
