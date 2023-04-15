@@ -13,7 +13,6 @@ import scala.annotation.targetName
 import snake._
 import scala.collection.mutable.ArrayBuffer
 import scala.collection.mutable.HashMap
-import java.awt.Event
 
 case class Vect2d(x: Double, y: Double)
 case class Rect(x: Double, y: Double, w: Double, h: Double)
@@ -185,11 +184,10 @@ object TutorialApp {
 
   // Arguments: speed pulse and direction to move
   def movement(
-      speedPulse: Option[Double],
+      speedPulse: Double,
       direction: Direction
-  ): Option[Vect2d] = {
-    speedPulse.map((speed) => Vect2d(direction.x * speed, direction.y * speed))
-  }
+  ) =
+    Vect2d(direction.x * speedPulse, direction.y * speedPulse)
 
   def buttonStateLatch(
       arg: (Option[Double], Option[Double]),
@@ -234,87 +232,65 @@ object TutorialApp {
     (output, Some(output))
   }
 
-  def snake(
-      bounds: Rect
-  ): ReactiveStreamAny[
-    (Option[Vect2d], Boolean),
-    (List[Vect2d], Boolean)
-  ] = {
-    def _snake(
-        deltaOption: (Option[Vect2d], Boolean),
-        past: Option[(List[Vect2d], Boolean, Boolean)]
-    ): (List[Vect2d], Boolean, Boolean) = {
-      val (delta, didEatFood) = deltaOption
-      val pastSnake = past match {
-        case None => {
-          val startY = 200
-          val start = Vect2d(0, 200) ::
-            Vect2d(0, startY - SNAKE_SIZE) ::
-            List(Vect2d(0, startY - SNAKE_SIZE * 2))
-          start
-        }
-        case Some(((snake, _, _))) => {
-          snake
-        }
-      }
-      val didEatFoodStored = past.map(_._3).getOrElse(false) || didEatFood
-      delta match {
-        case None =>
-          (pastSnake, false, didEatFoodStored)
-        case Some(delta) => {
-          val newHeadX = pastSnake.head.x + delta.x
-          val newHeadY = pastSnake.head.y + delta.y
-          if (
-            newHeadX < 0 || newHeadX >= bounds.w || newHeadY < 0 || newHeadY >= bounds.h || pastSnake
-              .contains(Vect2d(newHeadX, newHeadY))
-          ) {
-            (pastSnake, true, didEatFoodStored)
-          } else {
-            val oldSnake = if didEatFoodStored then pastSnake else pastSnake.dropRight(1)
-            val newSnake = Vect2d(newHeadX, newHeadY) :: oldSnake
-            (newSnake, false, false)
-          }
-        }
-      }
-    }
-    toAny(liftWithOutput(_snake)).map((output) => (output._1, output._2))
+  lazy val DEFAULT_SNAKE: List[Vect2d] = {
+    val startY = 200
+    Vect2d(0, startY) ::
+      Vect2d(0, startY - SNAKE_SIZE) ::
+      List(Vect2d(0, startY - SNAKE_SIZE * 2))
   }
 
-  def food(bounds: Rect): ReactiveStreamAny[
-    Option[List[Vect2d]],
-    (Vect2d, Boolean)
-  ] = {
-    def _food(
-        snakeArgument: Option[List[Vect2d]],
-        past: Option[Vect2d]
-    ): ((Vect2d, Boolean), Option[Vect2d]) = {
-      val oldFoodPosition = past.getOrElse(Vect2d(SNAKE_SIZE * 3, SNAKE_SIZE * 4))
-      val snake = snakeArgument.getOrElse(List())
-      snake.headOption match {
-        case None => ((oldFoodPosition, false), Some(oldFoodPosition))
-        case Some(head) =>
-          if (
-            (head.x / SNAKE_SIZE).toInt == (oldFoodPosition.x / SNAKE_SIZE).toInt
-            && (head.y / SNAKE_SIZE).toInt == (oldFoodPosition.y / SNAKE_SIZE).toInt
-          ) {
-            val random = new scala.util.Random
-            lazy val newFoodPositionStream: LazyList[Vect2d] = Vect2d(
+  // Returns snake and didHitWall
+  def snake(
+      bounds: Rect,
+      delta: Vect2d,
+      didEatFood: Boolean,
+      pastSnake: List[Vect2d]
+  ): (List[Vect2d], Boolean) = {
+    val newHeadX = pastSnake.head.x + delta.x
+    val newHeadY = pastSnake.head.y + delta.y
+    if (
+      newHeadX < 0 || newHeadX >= bounds.w || newHeadY < 0 || newHeadY >= bounds.h || pastSnake
+        .contains(Vect2d(newHeadX, newHeadY))
+    ) {
+      (pastSnake, true)
+    } else {
+      val oldSnake = if didEatFood then pastSnake else pastSnake.dropRight(1)
+      val newSnake = Vect2d(newHeadX, newHeadY) :: oldSnake
+      (newSnake, false)
+    }
+  }
+
+  val DEFAULT_FOOD = Vect2d(SNAKE_SIZE * 3, SNAKE_SIZE * 4)
+
+  // Returns: foodPos, didEatFood
+  def food(
+      bounds: Rect,
+      snake: List[Vect2d],
+      pastFood: Vect2d
+  ): (Vect2d, Boolean) = {
+    snake.headOption match {
+      case None => (pastFood, false)
+      case Some(head) =>
+        if (
+          (head.x / SNAKE_SIZE).toInt == (pastFood.x / SNAKE_SIZE).toInt
+          && (head.y / SNAKE_SIZE).toInt == (pastFood.y / SNAKE_SIZE).toInt
+        ) {
+          val random = new scala.util.Random
+          lazy val newFoodPositionStream: LazyList[Vect2d] = Vect2d(
+            random.nextInt((bounds.w / SNAKE_SIZE).toInt) * SNAKE_SIZE,
+            random.nextInt((bounds.h / SNAKE_SIZE).toInt) * SNAKE_SIZE
+          ) #:: newFoodPositionStream.map { _ =>
+            Vect2d(
               random.nextInt((bounds.w / SNAKE_SIZE).toInt) * SNAKE_SIZE,
               random.nextInt((bounds.h / SNAKE_SIZE).toInt) * SNAKE_SIZE
-            ) #:: newFoodPositionStream.map { _ =>
-              Vect2d(
-                random.nextInt((bounds.w / SNAKE_SIZE).toInt) * SNAKE_SIZE,
-                random.nextInt((bounds.h / SNAKE_SIZE).toInt) * SNAKE_SIZE
-              )
-            }
-            val newFood = newFoodPositionStream.find(!snake.contains(_)).get
-            ((newFood, true), Some(newFood))
-          } else {
-            ((oldFoodPosition, false), Some(oldFoodPosition))
+            )
           }
-      }
+          val newFood = newFoodPositionStream.find(!snake.contains(_)).get
+          (newFood, true)
+        } else {
+          (pastFood, false)
+        }
     }
-    toAny(_food)
   }
 
   def makeButtonLatch(
@@ -474,7 +450,8 @@ object TutorialApp {
       paused: Boolean,
       score: Int,
       snake: List[Vect2d],
-      foodPos: Vect2d
+      foodPos: Vect2d,
+      didEatFood: Boolean
   )
 
   var mainState: Option[
@@ -552,6 +529,12 @@ object TutorialApp {
             })
         })
 
+      val snakeWithFood = assumeIdentity[(List[Vect2d], Vect2d)] // assume pastSnake, pastFood
+        .map { case (snake: List[Vect2d], pastFood: Vect2d) =>
+          val (foodPos, didEatFood) = food(bounds, snake, pastFood)
+          (snake, foodPos, didEatFood)
+        }
+
       feedbackSourceFlatMap((input: Option[GameState]) => {
         val (
           latchedDirection: Option[Direction],
@@ -563,58 +546,120 @@ object TutorialApp {
             .map(value => (Some(value.direction), Some(value.snake), value.isGameOver, value.score))
             .getOrElse((None, None, false, 0))
 
+        val snakeInfo = assumeIdentity[Double]
+          .connectRightSource(
+            actualDirection
+              .applyValue(latchedDirection)
+          )
+          .map { case (tick: Double, direction: Direction) => movement(tick, direction) }
+          .connectLeft(snakeWithFood)
+          .map {
+            case (
+                  (pastSnake: List[Vect2d], food: Vect2d, didEatFood: Boolean),
+                  delta: Vect2d
+                ) =>
+              val (snakePos, isGameOver) = snake(bounds, delta, didEatFood, pastSnake)
+              (food, snakePos, didEatFood, isGameOver)
+          }
+          .cachedIfNoInput()
+
+        withDefaultOutput(
+          (DEFAULT_FOOD, DEFAULT_SNAKE, false, false),
+          snakeInfo
+        )
+          .inputMap((input: (Option[List[Vect2d]], Option[Vect2d], Option[Double])) =>
+            input match {
+              case (Some(snake), Some(food), Some(tick)) => Some(((snake, food), tick))
+              case _                                     => None
+            }
+          )
+          .rightChannelExtendSource {
+            case (_, _, didEatFood, isGameOver) => {
+              pair(
+                toAny(accumulate(1))
+                  .applyValue(
+                    didEatFood
+                  ),
+                toAny(positiveLatch)
+                  .applyValue(isGameOver)
+              )
+            }
+          }
+        // .map({
+        //   case ((food, snake, didEatFood, _), (score, isGameOver)) => {
+        //     GameState(
+        //       latchedDirection,
+        //       tick,
+        //       isGameOver,
+        //       paused,
+        //       score,
+        //       snake,
+        //       food,
+        //       didEatFood
+        //     )
+        //   }
+        // })
+
         pause
-          .flatMapSource(paused => {
-            pair(
-              actualDirection
-                .applyValue(latchedDirection),
-              toAny(tick)
-                .applyValue((time, (isGameOver || paused, score)))
-            )
-              .flatMapSource({ (direction, tick) =>
-                cachedSource(
-                  (paused, direction, tick),
-                  food(bounds)
-                    .applyValue(pastSnake)
-                    .flatMapSource({
-                      case (foodPos, didEatFood) => {
-                        latchValue(
-                          Direction(0, 1),
-                          tick.map(_ => direction)
-                        ).flatMapSource(latchedDirection => {
-                          snake(bounds)
-                            .applyValue((movement(tick, latchedDirection), didEatFood))
-                            .flatMapSource(
-                              { case (snake, isGameOverCurrent) =>
-                                pair(
-                                  toAny(accumulate(1))
-                                    .applyValue(
-                                      didEatFood
-                                    ),
-                                  toAny(positiveLatch)
-                                    .applyValue(isGameOverCurrent)
-                                )
-                                  .map({
-                                    case (score, isGameOver) => {
-                                      GameState(
-                                        latchedDirection,
-                                        tick,
-                                        isGameOver,
-                                        paused,
-                                        score,
-                                        snake,
-                                        foodPos
-                                      )
-                                    }
-                                  })
-                              }
-                            )
-                        })
-                      }
-                    })
-                )
-              })
-          })
+          .rightChannelExtendSource(paused =>
+            toAny(tick)
+              .applyValue((time, (isGameOver || paused, score)))
+          )
+
+        ???
+        // pause
+        //   .flatMapSource(paused => {
+        //     pair(
+        //       actualDirection
+        //         .applyValue(latchedDirection),
+        // toAny(tick)
+        //   .applyValue((time, (isGameOver || paused, score)))
+        //     )
+        //       .flatMapSource({ (direction, tick) =>
+        //         cachedSource(
+        //           (paused, direction, tick),
+        //           food(bounds)
+        //             .applyValue(pastSnake)
+        //             .flatMapSource({
+        //               case (foodPos, didEatFood) => {
+        //                 latchValue(
+        //                   Direction(0, 1),
+        //                   tick.map(_ => direction)
+        //                 ).flatMapSource(latchedDirection => {
+        //                   snake(bounds)
+        //                     .applyValue((movement(tick, latchedDirection), didEatFood))
+        //                     .flatMapSource(
+        //                       { case (snake, isGameOverCurrent) =>
+        // pair(
+        //   toAny(accumulate(1))
+        //     .applyValue(
+        //       didEatFood
+        //     ),
+        //   toAny(positiveLatch)
+        //     .applyValue(isGameOverCurrent)
+        // )
+        //   .map({
+        //     case (score, isGameOver) => {
+        //       GameState(
+        //         latchedDirection,
+        //         tick,
+        //         isGameOver,
+        //         paused,
+        //         score,
+        //         snake,
+        //         foodPos,
+        //         didEatFood
+        //       )
+        //     }
+        //   })
+        //                       }
+        //                     )
+        //                 })
+        //               }
+        //             })
+        //         )
+        //       })
+        //   })
       })
     })
 
