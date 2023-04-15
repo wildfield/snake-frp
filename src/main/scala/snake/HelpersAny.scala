@@ -74,6 +74,11 @@ trait Source[Output] extends SourceAny[Output] { self =>
     }
     toSource(_withPastOutput)
   }
+
+  def rightChannelExtendSource[T1](
+      f: (Output) => Source[T1]
+  ): Source[(Output, T1)] =
+    self.flatMapSource(output => f(output).map((output, _)))
 }
 
 implicit def toSource[Output](
@@ -127,7 +132,7 @@ trait Reactive[Input, Output] extends ReactiveStreamAny[Input, Output] { self =>
   def flatMapSource[T](
       map: Output => Source[T]
   ): Reactive[Input, T] = {
-    def _flatMap(
+    def _flatMapSource(
         argument: Input,
         past: Memory
     ): (T, Memory) = {
@@ -140,7 +145,7 @@ trait Reactive[Input, Output] extends ReactiveStreamAny[Input, Output] { self =>
       val mappedFOutput = map(fOutput._1)(pastValueMapped)
       (mappedFOutput._1, Some(fOutput._2, mappedFOutput._2))
     }
-    toReactive(_flatMap)
+    toReactive(_flatMapSource)
   }
 
   def clearMem(
@@ -247,15 +252,15 @@ trait Reactive[Input, Output] extends ReactiveStreamAny[Input, Output] { self =>
         past: Memory
     ): (Option[Output], Memory) = {
       val (pastOutput: Option[Output], pastMemory: Option[Any]) =
-        past.map(_.asInstanceOf[(Output, Option[Any])]) match {
+        past.map(_.asInstanceOf[(Option[Output], Option[Any])]) match {
           case None                 => (None, None)
-          case Some(value1, value2) => (Some(value1), value2)
+          case Some(value1, value2) => (value1, value2)
         }
       argument match {
         case None => (pastOutput, Some(pastOutput, pastMemory))
         case Some(argument) =>
           val output = self(argument, pastMemory)
-          (Some(output._1), Some(output._1, output._2))
+          (Some(output._1), Some(Some(output._1), output._2))
       }
     }
     toReactive(_cachedIfNoInput)
@@ -706,7 +711,7 @@ def assumeIdentity[T1]: Reactive[T1, T1] = {
       argument: T1,
       past: Memory
   ): (T1, Memory) = {
-    (argument, None)
+    (argument, past)
   }
   toReactive(_assumeIdentity)
 }
@@ -719,8 +724,7 @@ def applyPartial[T1, T2, T3](
       argument: T2,
       past: Memory
   ): (T3, Memory) = {
-    val value1 = f1((a, argument), past)
-    value1
+    f1((a, argument), past)
   }
   toReactive(_apply)
 }
