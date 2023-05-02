@@ -1,19 +1,17 @@
 package snake
 
-import snake.TutorialApp.stepsSinceLastState
-
 trait StatefulStream[Input, Output, Memory] {
   def run(input: Input): Output
   def clear(newValue: Memory): Unit
 }
 
 def create[Input, Output, Memory](
-    stream: ReactiveStreamAny[Input, Output, Memory],
+    stream: ReactiveStreamFunc[Input, Output, Memory],
     defaultState: Memory
 ): StatefulStream[Input, Output, Memory] = LoopStateMachine(stream, defaultState)
 
 class LoopStateMachine[Input, Output, Memory](
-    stream: ReactiveStreamAny[Input, Output, Memory],
+    stream: ReactiveStreamFunc[Input, Output, Memory],
     defaultState: Memory
 ) extends StatefulStream[Input, Output, Memory] {
   private var state: Memory = defaultState

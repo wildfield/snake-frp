@@ -238,7 +238,7 @@ object TutorialApp {
 
   def snake(
       bounds: Rect
-  ): ReactiveStreamAny[
+  ): ReactiveStreamFunc[
     (Option[Vect2d], Boolean),
     (List[Vect2d], Boolean),
     Option[(List[Vect2d], Boolean, Boolean)]
@@ -290,7 +290,7 @@ object TutorialApp {
       )
   }
 
-  def food(bounds: Rect): ReactiveStreamAny[
+  def food(bounds: Rect): ReactiveStreamFunc[
     Option[List[Vect2d]],
     (Vect2d, Boolean),
     Option[Vect2d]
@@ -327,7 +327,7 @@ object TutorialApp {
   def makeButtonLatch(
       press: (Double, Option[Double]) => Option[Double],
       release: (Double, Option[Double]) => Option[Double]
-  ): Reactive[(Option[Double], Double), Option[Double], Option[Double]] = {
+  ): ReactiveStream[(Option[Double], Double), Option[Double], Option[Double]] = {
     assumeInputSource({
       case (pastTime: Option[Double], time: Double) => {
         identityWithMemory
@@ -437,7 +437,7 @@ object TutorialApp {
     }
   }
 
-  def withPastTime[T](f: (Double, Option[Double]) => T): Reactive[Double, T, Option[Double]] =
+  def withPastTime[T](f: (Double, Option[Double]) => T): ReactiveStream[Double, T, Option[Double]] =
     identityWithPast[Double]
       .map({
         case (pastTime, time) => {

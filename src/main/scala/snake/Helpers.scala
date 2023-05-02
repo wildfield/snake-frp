@@ -3,7 +3,7 @@ package snake
 import scala.annotation.targetName
 import scala.language.implicitConversions
 
-type ReactiveStreamAny[Input, Output, Memory] =
+type ReactiveStreamFunc[Input, Output, Memory] =
   (Input, Memory) => (Output, Memory)
 type SourceAny[Output, Memory] =
   (Memory) => (Output, Memory)
@@ -23,8 +23,8 @@ trait Source[Output, Memory] extends SourceAny[Output, Memory] { self =>
   }
 
   def flatMap[T1, T2, MappedMemory](
-      map: Output => Reactive[T1, T2, MappedMemory]
-  ): Reactive[T1, T2, (Memory, MappedMemory)] = {
+      map: Output => ReactiveStream[T1, T2, MappedMemory]
+  ): ReactiveStream[T1, T2, (Memory, MappedMemory)] = {
     def _flatMap(
         argument: T1,
         past: (Memory, MappedMemory)
@@ -34,7 +34,7 @@ trait Source[Output, Memory] extends SourceAny[Output, Memory] { self =>
       val mappedFOutput = map(fOutput._1)(argument, pastValueMapped)
       (mappedFOutput._1, (fOutput._2, mappedFOutput._2))
     }
-    toReactive(_flatMap)
+    toReactiveStream(_flatMap)
   }
 
   def flatMapSource[T1, MappedMemory](
@@ -103,7 +103,8 @@ implicit def toSource[Output, Memory](
   def apply(m: Memory) = f(m)
 }
 
-trait Reactive[Input, Output, Memory] extends ReactiveStreamAny[Input, Output, Memory] { self =>
+trait ReactiveStream[Input, Output, Memory] extends ReactiveStreamFunc[Input, Output, Memory] {
+  self =>
   def applyValue(
       a: Input
   ): Source[Output, Memory] = {
@@ -118,27 +119,27 @@ trait Reactive[Input, Output, Memory] extends ReactiveStreamAny[Input, Output, M
 
   def map[T](
       mapFunc: Output => T
-  ): Reactive[Input, T, Memory] = {
+  ): ReactiveStream[Input, T, Memory] = {
     def _map(argument: Input, past: Memory): (T, Memory) = {
       val value = self(argument, past)
       (mapFunc(value._1), value._2)
     }
-    toReactive(_map)
+    toReactiveStream(_map)
   }
 
   def mapWithMemory[T](
       mapFunc: (Output, Memory) => (T, Memory)
-  ): Reactive[Input, T, Memory] = {
+  ): ReactiveStream[Input, T, Memory] = {
     def _map(argument: Input, past: Memory): (T, Memory) = {
       val value = self(argument, past)
       mapFunc(value._1, value._2)
     }
-    toReactive(_map)
+    toReactiveStream(_map)
   }
 
   def flatMap[T1, T2, MappedMemory](
-      map: Output => Reactive[T1, T2, MappedMemory]
-  ): Reactive[(Input, T1), T2, (Memory, MappedMemory)] = {
+      map: Output => ReactiveStream[T1, T2, MappedMemory]
+  ): ReactiveStream[(Input, T1), T2, (Memory, MappedMemory)] = {
     def _flatMap(
         argument: (Input, T1),
         past: (Memory, MappedMemory)
@@ -148,12 +149,12 @@ trait Reactive[Input, Output, Memory] extends ReactiveStreamAny[Input, Output, M
       val mappedFOutput = map(fOutput._1)(argument._2, pastValueMapped)
       (mappedFOutput._1, (fOutput._2, mappedFOutput._2))
     }
-    toReactive(_flatMap)
+    toReactiveStream(_flatMap)
   }
 
   def flatMapSource[T, MappedMemory](
       map: Output => Source[T, MappedMemory]
-  ): Reactive[Input, T, (Memory, MappedMemory)] = {
+  ): ReactiveStream[Input, T, (Memory, MappedMemory)] = {
     def _flatMap(
         argument: Input,
         past: (Memory, MappedMemory)
@@ -163,22 +164,22 @@ trait Reactive[Input, Output, Memory] extends ReactiveStreamAny[Input, Output, M
       val mappedFOutput = map(fOutput._1)(pastValueMapped)
       (mappedFOutput._1, (fOutput._2, mappedFOutput._2))
     }
-    toReactive(_flatMapSource)
+    toReactiveStream(_flatMap)
   }
 
   def ignoreInput[T](
-  ): Reactive[(T, Input), Output, Memory] = {
+  ): ReactiveStream[(T, Input), Output, Memory] = {
     def _ignoreInput(
         argument: (T, Input),
         past: Memory
     ): (Output, Memory) = {
       self(argument._2, past)
     }
-    toReactive(_ignoreInput)
+    toReactiveStream(_ignoreInput)
   }
 
   def withPastOutput(
-  ): Reactive[Input, (Option[Output], Output), (Option[Output], Memory)] = {
+  ): ReactiveStream[Input, (Option[Output], Output), (Option[Output], Memory)] = {
     def _withPastOutput(
         argument: Input,
         past: (Option[Output], Memory)
@@ -187,13 +188,13 @@ trait Reactive[Input, Output, Memory] extends ReactiveStreamAny[Input, Output, M
       val output = self(argument, pastFValue)
       ((pastOutput, output._1), (Some(output._1), output._2))
     }
-    toReactive(_withPastOutput)
+    toReactiveStream(_withPastOutput)
   }
 
   def mapMemory[M1](
       inF: M1 => Memory,
       outF: Memory => M1
-  ): Reactive[Input, Output, M1] = {
+  ): ReactiveStream[Input, Output, M1] = {
     def _mapMemory(
         argument: Input,
         past: M1
@@ -201,12 +202,12 @@ trait Reactive[Input, Output, Memory] extends ReactiveStreamAny[Input, Output, M
       val output = self(argument, inF(past))
       (output._1, outF(output._2))
     }
-    toReactive(_mapMemory)
+    toReactiveStream(_mapMemory)
   }
 
   def withInitialMemory(
       initialValue: Memory
-  ): Reactive[Input, Output, Option[Memory]] =
+  ): ReactiveStream[Input, Output, Option[Memory]] =
     self.mapMemory(
       _ match {
         case Some(memory) => memory
@@ -216,15 +217,15 @@ trait Reactive[Input, Output, Memory] extends ReactiveStreamAny[Input, Output, M
     )
 }
 
-implicit def toReactive[Input, Output, Memory](
-    f: ReactiveStreamAny[Input, Output, Memory]
-): Reactive[Input, Output, Memory] = new Reactive[Input, Output, Memory]() {
+implicit def toReactiveStream[Input, Output, Memory](
+    f: ReactiveStreamFunc[Input, Output, Memory]
+): ReactiveStream[Input, Output, Memory] = new ReactiveStream[Input, Output, Memory]() {
   def apply(i: Input, m: Memory) = f(i, m)
 }
 
 def flatten[T1, T2, T3, M1, M2](
-    f: Reactive[T1, Reactive[T2, T3, M2], M1]
-): Reactive[(T1, T2), T3, (M1, M2)] = {
+    f: ReactiveStream[T1, ReactiveStream[T2, T3, M2], M1]
+): ReactiveStream[(T1, T2), T3, (M1, M2)] = {
   def _flatten(
       argument: (T1, T2),
       past: (M1, M2)
@@ -238,8 +239,8 @@ def flatten[T1, T2, T3, M1, M2](
 }
 
 def cached[T1 <: Equals, T2, Memory](
-    f: Reactive[T1, T2, Memory]
-): Reactive[T1, T2, (Option[T1], Option[T2], Memory)] = {
+    f: ReactiveStream[T1, T2, Memory]
+): ReactiveStream[T1, T2, (Option[T1], Option[T2], Memory)] = {
   def _cached(
       argument: T1,
       past: (Option[T1], Option[T2], Memory)
@@ -260,7 +261,7 @@ def cached[T1 <: Equals, T2, Memory](
         (output._1, (Some(argument), Some(output._1), output._2))
     }
   }
-  toReactive(_cached)
+  toReactiveStream(_cached)
 }
 
 def cachedSource[T1 <: Equals, T2, Memory](
@@ -290,8 +291,8 @@ def cachedSource[T1 <: Equals, T2, Memory](
 }
 
 def feedback[T1, T2, M1](
-    f: Reactive[(Option[T2], T1), T2, M1]
-): Reactive[T1, T2, (Option[T2], M1)] = {
+    f: ReactiveStream[(Option[T2], T1), T2, M1]
+): ReactiveStream[T1, T2, (Option[T2], M1)] = {
   def _feedback(
       argument: T1,
       past: (Option[T2], M1)
@@ -300,11 +301,11 @@ def feedback[T1, T2, M1](
     val output = f((pastOutput, argument), pastFValue)
     (output._1, (Some(output._1), output._2))
   }
-  toReactive(_feedback)
+  toReactiveStream(_feedback)
 }
 
 def feedbackSource[T2, Memory](
-    f: Reactive[Option[T2], T2, Memory]
+    f: ReactiveStream[Option[T2], T2, Memory]
 ): Source[T2, (Option[T2], Memory)] = {
   def _feedbackSource(
       past: (Option[T2], Memory)
@@ -317,8 +318,8 @@ def feedbackSource[T2, Memory](
 }
 
 def feedbackChannel[T1, T2, T3, Memory](
-    f: Reactive[(Option[T2], T1), (T2, T3), Memory]
-): Reactive[T1, T3, (Option[T2], Memory)] = {
+    f: ReactiveStream[(Option[T2], T1), (T2, T3), Memory]
+): ReactiveStream[T1, T3, (Option[T2], Memory)] = {
   def _feedbackSource(
       argument: T1,
       past: (Option[T2], Memory)
@@ -327,11 +328,11 @@ def feedbackChannel[T1, T2, T3, Memory](
     val output = f((pastOutput, argument), pastFValue)
     (output._1._2, (Some(output._1._1), output._2))
   }
-  toReactive(_feedbackSource)
+  toReactiveStream(_feedbackSource)
 }
 
 def feedbackChannelSource[T2, T3, Memory](
-    f: Reactive[Option[T2], (T2, T3), Memory]
+    f: ReactiveStream[Option[T2], (T2, T3), Memory]
 ): Source[T3, (Option[T2], Memory)] = {
   def _feedbackSource(
       past: (Option[T2], Memory)
@@ -344,46 +345,46 @@ def feedbackChannelSource[T2, T3, Memory](
 }
 
 def assumeInput[T1, T2, T3, Memory](
-    f: T1 => Reactive[T2, T3, Memory]
-): Reactive[(T1, T2), T3, Memory] = {
+    f: T1 => ReactiveStream[T2, T3, Memory]
+): ReactiveStream[(T1, T2), T3, Memory] = {
   def _assume(
       argument: (T1, T2),
       past: Memory
   ): (T3, Memory) = {
     f(argument._1)(argument._2, past)
   }
-  toReactive(_assume)
+  toReactiveStream(_assume)
 }
 
 def assumeInputSource[T1, T2, Memory](
     f: T1 => Source[T2, Memory]
-): Reactive[T1, T2, Memory] = {
+): ReactiveStream[T1, T2, Memory] = {
   def _assumeSource(
       argument: T1,
       past: Memory
   ): (T2, Memory) = {
     f(argument)(past)
   }
-  toReactive(_assumeSource)
+  toReactiveStream(_assumeSource)
 }
 
 def applyPartial[T1, T2, T3, Memory](
-    f1: Reactive[(T1, T2), T3, Memory],
+    f1: ReactiveStream[(T1, T2), T3, Memory],
     a: T1
-): Reactive[T2, T3, Memory] = {
+): ReactiveStream[T2, T3, Memory] = {
   def _apply(
       argument: T2,
       past: Memory
   ): (T3, Memory) = {
     f1((a, argument), past)
   }
-  toReactive(_apply)
+  toReactiveStream(_apply)
 }
 
 def applyPartial2[T1, T2, T3, Memory](
-    f1: Reactive[(T1, T2), T3, Memory],
+    f1: ReactiveStream[(T1, T2), T3, Memory],
     a: T2
-): Reactive[T1, T3, Memory] = {
+): ReactiveStream[T1, T3, Memory] = {
   def _apply(
       argument: T1,
       past: Memory
@@ -391,7 +392,7 @@ def applyPartial2[T1, T2, T3, Memory](
     val value1 = f1((argument, a), past)
     value1
   }
-  toReactive(_apply)
+  toReactiveStream(_apply)
 }
 
 def detectChange[T1 <: Equals, Memory](
@@ -408,34 +409,34 @@ def detectChange[T1 <: Equals, Memory](
   toSource(_detectChange)
 }
 
-def identity[T1](): Reactive[T1, T1, Unit] = {
+def identity[T1](): ReactiveStream[T1, T1, Unit] = {
   def _identity(
       argument: T1,
       past: Unit
   ): (T1, Unit) = {
     (argument, past)
   }
-  toReactive(_identity)
+  toReactiveStream(_identity)
 }
 
-def identityWithPast[T1]: Reactive[T1, (Option[T1], T1), Option[T1]] = {
+def identityWithPast[T1]: ReactiveStream[T1, (Option[T1], T1), Option[T1]] = {
   def _identity(
       argument: T1,
       past: Option[T1]
   ): ((Option[T1], T1), Option[T1]) = {
     ((past, argument), Some(argument))
   }
-  toReactive(_identity)
+  toReactiveStream(_identity)
 }
 
-def identityWithMemory[T1, M1]: Reactive[T1, T1, M1] = {
+def identityWithMemory[T1, M1]: ReactiveStream[T1, T1, M1] = {
   def _identity(
       argument: T1,
       past: M1
   ): (T1, M1) = {
     (argument, past)
   }
-  toReactive(_identity)
+  toReactiveStream(_identity)
 }
 
 def identitySource[T1](value: T1): Source[T1, Unit] = {
@@ -448,9 +449,9 @@ def identitySource[T1](value: T1): Source[T1, Unit] = {
 }
 
 def connect[T1, T2, T3, M1, M2](
-    f1: Reactive[T1, T2, M1],
-    f2: Reactive[T2, T3, M2]
-): Reactive[T1, T3, (M1, M2)] = {
+    f1: ReactiveStream[T1, T2, M1],
+    f2: ReactiveStream[T2, T3, M2]
+): ReactiveStream[T1, T3, (M1, M2)] = {
   def _connect(
       argument: T1,
       past: (M1, M2)
@@ -460,13 +461,13 @@ def connect[T1, T2, T3, M1, M2](
     val f2Output = f2(f1Output._1, pastValueF2)
     (f2Output._1, (f1Output._2, f2Output._2))
   }
-  toReactive(_connect)
+  toReactiveStream(_connect)
 }
 
 def pair[T1, T2, T3, T4, M1, M2](
-    f1: Reactive[T1, T2, M1],
-    f2: Reactive[T3, T4, M2]
-): Reactive[(T1, T3), (T2, T4), (M1, M2)] = {
+    f1: ReactiveStream[T1, T2, M1],
+    f2: ReactiveStream[T3, T4, M2]
+): ReactiveStream[(T1, T3), (T2, T4), (M1, M2)] = {
   def _pairCombinator(
       argument: (T1, T3),
       past: (M1, M2)
@@ -476,13 +477,13 @@ def pair[T1, T2, T3, T4, M1, M2](
     val value2 = f2(argument._2, pastValueF2)
     ((value1._1, value2._1), (value1._2, value2._2))
   }
-  toReactive(_pairCombinator)
+  toReactiveStream(_pairCombinator)
 }
 
 def sharedPair[T1, T2, T3, M1, M2](
-    f1: Reactive[T1, T2, M1],
-    f2: Reactive[T1, T3, M2]
-): Reactive[T1, (T2, T3), (M1, M2)] = {
+    f1: ReactiveStream[T1, T2, M1],
+    f2: ReactiveStream[T1, T3, M2]
+): ReactiveStream[T1, (T2, T3), (M1, M2)] = {
   def _pairCombinator(
       argument: T1,
       past: (M1, M2)
@@ -492,7 +493,7 @@ def sharedPair[T1, T2, T3, M1, M2](
     val value2 = f2(argument, pastValueF2)
     ((value1._1, value2._1), (value1._2, value2._2))
   }
-  toReactive(_pairCombinator)
+  toReactiveStream(_pairCombinator)
 }
 
 def pair[T1, T2, M1, M2](
@@ -512,8 +513,8 @@ def pair[T1, T2, M1, M2](
 
 def latch[T1, T2](
     defaultValue: T2,
-    f1: Reactive[T1, Option[T2], Option[T2]]
-): Reactive[T1, T2, Option[T2]] = {
+    f1: ReactiveStream[T1, Option[T2], Option[T2]]
+): ReactiveStream[T1, T2, Option[T2]] = {
   def _latch(
       argument: T1,
       past: Option[T2]
@@ -532,7 +533,7 @@ def latch[T1, T2](
         }
     }
   }
-  toReactive(_latch)
+  toReactiveStream(_latch)
 }
 
 def latchValue[T1](
@@ -594,8 +595,8 @@ def repeatPast[Output](
 }
 
 def anyMemory[Input, Output, Memory](
-    stream: Reactive[Input, Output, Option[Memory]]
-): Reactive[Input, Output, Option[Any]] =
+    stream: ReactiveStream[Input, Output, Option[Memory]]
+): ReactiveStream[Input, Output, Option[Any]] =
   stream.mapMemory(_.map(_.asInstanceOf[Memory]), _.map(_.asInstanceOf[Any]))
 
 def anyMemory[Output, Memory](
