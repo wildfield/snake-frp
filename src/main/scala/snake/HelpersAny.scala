@@ -84,6 +84,17 @@ trait Source[Output, Memory] extends SourceAny[Output, Memory] { self =>
     }
     toSource(_mapMemory)
   }
+
+  def withInitialMemory(
+      initialValue: Memory
+  ): Source[Output, Option[Memory]] =
+    self.mapMemory(
+      _ match {
+        case Some(memory) => memory
+        case None         => initialValue
+      },
+      Some(_)
+    )
 }
 
 implicit def toSource[Output, Memory](
@@ -192,6 +203,17 @@ trait Reactive[Input, Output, Memory] extends ReactiveStreamAny[Input, Output, M
     }
     toReactive(_mapMemory)
   }
+
+  def withInitialMemory(
+      initialValue: Memory
+  ): Reactive[Input, Output, Option[Memory]] =
+    self.mapMemory(
+      _ match {
+        case Some(memory) => memory
+        case None         => initialValue
+      },
+      Some(_)
+    )
 }
 
 implicit def toReactive[Input, Output, Memory](
@@ -560,14 +582,13 @@ def latchSource[T1](
   toSource(_latch)
 }
 
-def repeatPast[Output, Memory](
+def repeatPast[Output](
     input: Output
-): Source[(Option[Output]), (Option[Output], Memory)] = {
+): Source[(Option[Output]), Option[Output]] = {
   def _repeatPast(
-      past: (Option[Output], Memory)
-  ): (Option[Output], (Option[Output], Memory)) = {
-    val (pastOutput, pastFValue) = past
-    (pastOutput, (Some(input), pastFValue))
+      past: Option[Output]
+  ): (Option[Output], Option[Output]) = {
+    (past, Some(input))
   }
   toSource(_repeatPast)
 }
