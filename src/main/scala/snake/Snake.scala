@@ -14,6 +14,10 @@ import snake._
 import scala.collection.mutable.ArrayBuffer
 import scala.collection.mutable.HashMap
 
+val DELTA_T = 25
+
+type Time = Double
+
 case class Vect2d(x: Double, y: Double)
 case class Rect(x: Double, y: Double, w: Double, h: Double)
 case class Direction(x: Int, y: Int)
@@ -553,8 +557,12 @@ object TutorialApp {
           })
           .withInitialMemory((None, None))
 
-      val directionValidation = identityWithMemory
-        .mapWithMemory(liftWithOutput(validatedCurrentDirection))
+      val directionValidation =
+        identityWithMemory[(List[Direction], Option[Direction]), Option[Direction]]
+          .mapWithMemory((arguments, past) =>
+            val output = validatedCurrentDirection(arguments, past)
+            (output, Some(output))
+          )
 
       val actualDirection =
         assumeInputSource((lastMovedDirection: Option[Direction]) => {
