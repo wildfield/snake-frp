@@ -12,6 +12,10 @@ def create[Input, Output, Memory](
     defaultState: Memory
 ): StatefulStream[Input, Output, Memory] = LoopStateMachine(stream, defaultState)
 
+def createOption[Input, Output, Memory](
+    stream: ReactiveStreamAny[Input, Output, Option[Memory]]
+): StatefulStream[Input, Output, Option[Memory]] = LoopStateMachine(stream, None)
+
 class LoopStateMachine[Input, Output, Memory](
     stream: ReactiveStreamAny[Input, Output, Memory],
     defaultState: Memory
