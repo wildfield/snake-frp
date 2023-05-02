@@ -529,16 +529,18 @@ object TutorialApp {
 
     val resultStream = assumeInputSource((time: Double) => {
       val keyTuplesPre =
-        sharedPair(
+        anyMemory(
           sharedPair(
-            makeButtonLatch(leftPress, leftRelease),
-            makeButtonLatch(rightPress, rightRelease)
-          ).withInitialMemory((None, None)),
-          sharedPair(
-            makeButtonLatch(downPress, downRelease),
-            makeButtonLatch(upPress, upRelease)
+            sharedPair(
+              makeButtonLatch(leftPress, leftRelease),
+              makeButtonLatch(rightPress, rightRelease)
+            ).withInitialMemory((None, None)),
+            sharedPair(
+              makeButtonLatch(downPress, downRelease),
+              makeButtonLatch(upPress, upRelease)
+            ).withInitialMemory((None, None))
           ).withInitialMemory((None, None))
-        ).withInitialMemory((None, None))
+        )
 
       val keyTuples = repeatPast(time)
         .flatMapSource { case (pastTime: Option[Double]) =>
