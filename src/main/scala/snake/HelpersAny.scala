@@ -592,3 +592,13 @@ def repeatPast[Output](
   }
   toSource(_repeatPast)
 }
+
+def anyMemory[Input, Output, Memory](
+    stream: Reactive[Input, Output, Option[Memory]]
+): Reactive[Input, Output, Option[Any]] =
+  stream.mapMemory(_.map(_.asInstanceOf[Memory]), _.map(_.asInstanceOf[Any]))
+
+def anyMemory[Output, Memory](
+    source: Source[Output, Option[Memory]]
+): Source[Output, Option[Any]] =
+  source.mapMemory(_.map(_.asInstanceOf[Memory]), _.map(_.asInstanceOf[Any]))

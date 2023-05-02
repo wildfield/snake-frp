@@ -639,7 +639,7 @@ object TutorialApp {
 
     mainState = Some(
       createOption(
-        resultStream.mapMemory(_.map(_.asInstanceOf), _.map(_.asInstanceOf[Any]))
+        anyMemory(resultStream)
       )
     )
 
