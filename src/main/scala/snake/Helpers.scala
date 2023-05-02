@@ -129,16 +129,6 @@ trait ReactiveStream[Input, Output, Memory] extends ReactiveStreamFunc[Input, Ou
     toReactiveStream(_map)
   }
 
-  def mapWithMemory[T](
-      mapFunc: (Output, Memory) => (T, Memory)
-  ): ReactiveStream[Input, T, Memory] = {
-    def _map(argument: Input, past: Memory): (T, Memory) = {
-      val value = self(argument, past)
-      mapFunc(value._1, value._2)
-    }
-    toReactiveStream(_map)
-  }
-
   def flatMap[T1, T2, MappedMemory](
       map: Output => ReactiveStream[T1, T2, MappedMemory]
   ): ReactiveStream[(Input, T1), T2, (Memory, MappedMemory)] = {

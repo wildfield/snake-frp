@@ -303,8 +303,7 @@ object TutorialApp {
   ): ReactiveStream[(Option[Double], Double), Option[Double], Option[Double]] = {
     assumeInputSource({
       case (pastTime: Option[Double], time: Double) => {
-        identityWithMemory
-          .mapWithMemory(buttonStateLatch)
+        toReactiveStream(buttonStateLatch)
           .applyValue((press(time, pastTime), release(time, pastTime)))
       }
     })
@@ -432,8 +431,7 @@ object TutorialApp {
     assumeInputSource(
       (input: (Option[Double], Boolean, Boolean, Int, List[Vect2d], Vect2d, Int, Boolean)) =>
         val (tick, isGameOver, paused, score, snake, food, highScore, focusIn) = input
-        identityWithMemory
-          .mapWithMemory(shouldRedraw)
+        toReactiveStream(shouldRedraw)
           .applyValue((tick, paused, isGameOver, focusIn))
           .map({ shouldRedraw =>
             if (shouldRedraw) {
@@ -469,7 +467,7 @@ object TutorialApp {
     ]
   ] =
     None
-  var highScoreState = create(identityWithMemory.mapWithMemory(keepIfLarger), None)
+  var highScoreState = create(toReactiveStream(keepIfLarger), None)
 
   def stepsSinceLast(
       time: Double,
@@ -482,7 +480,7 @@ object TutorialApp {
     ((steps, stepTime, pastTime), Some(pastTime + stepTime * steps))
   }
 
-  var stepsSinceLastState = create(identityWithMemory.mapWithMemory(stepsSinceLast), None)
+  var stepsSinceLastState = create(toReactiveStream(stepsSinceLast), None)
 
   def main(args: Array[String]): Unit = {
     val bounds = Rect(0, 0, canvas.width, canvas.height)
