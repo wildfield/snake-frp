@@ -8,9 +8,6 @@ type ReactiveStreamFunc[Input, Output, Memory] =
 type SourceAny[Output, Memory] =
   (Memory) => (Output, Memory)
 
-type OldSource[Memory, Output] =
-  (Option[Memory]) => (Output, (Option[Memory]))
-
 trait Source[Output, Memory] extends SourceAny[Output, Memory] { self =>
   def map[T](
       mapFunc: Output => T
