@@ -92,6 +92,11 @@ trait Source[Output, Memory] extends SourceAny[Output, Memory] { self =>
       },
       Some(_)
     )
+
+  def rightChannelExtendSource[T1, M1](
+      f: (Output) => Source[T1, M1]
+  ): Source[(Output, T1), (Memory, M1)] =
+    self.flatMapSource(output => f(output).map((output, _)))
 }
 
 implicit def toSource[Output, Memory](
@@ -212,6 +217,181 @@ trait ReactiveStream[Input, Output, Memory] extends ReactiveStreamFunc[Input, Ou
       },
       Some(_)
     )
+
+  def inputMap[T1](
+      mapF: (T1) => Input
+  ): ReactiveStream[T1, Output, Memory] = {
+    def _inputMap(
+        argument: T1,
+        past: Memory
+    ): (Output, Memory) = {
+      self(mapF(argument), past)
+    }
+    toReactiveStream(_inputMap)
+  }
+
+  def inputMapSource[T1, M1](
+      mapF: (T1) => Source[Input, M1]
+  ): ReactiveStream[T1, Output, (M1, Memory)] = {
+    def _inputMap(
+        argument: T1,
+        past: (M1, Memory)
+    ): (Output, (M1, Memory)) = {
+      val (pastSource, pastMemory) = past
+      val sourceOutput = mapF(argument)(pastSource)
+      val output = self(sourceOutput._1, pastMemory)
+      (output._1, (sourceOutput._2, output._2))
+    }
+    toReactiveStream(_inputMap)
+  }
+
+  def inputFlatMap[T1, T2, M1](
+      mapF: (T1) => ReactiveStream[T2, Input, M1]
+  ): ReactiveStream[(T1, T2), Output, (M1, Memory)] = {
+    def _inputFlatMap(
+        argument: (T1, T2),
+        past: (M1, Memory)
+    ): (Output, (M1, Memory)) = {
+      val (pastMapped, pastMemory) = past
+      val mappedOutput = mapF(argument._1)(argument._2, pastMapped)
+      val output = self(mappedOutput._1, pastMemory)
+      (output._1, (mappedOutput._2, output._2))
+    }
+    toReactiveStream(_inputFlatMap)
+  }
+
+  def withDefaultInput(
+      default: Input
+  ): ReactiveStream[Option[Input], Output, Memory] =
+    self.inputMap((value: Option[Input]) => value.getOrElse(default))
+
+  def cachedIfNoInput(): ReactiveStream[Option[Input], Option[Output], (Option[Output], Memory)] = {
+    def _cachedIfNoInput(
+        argument: Option[Input],
+        past: (Option[Output], Memory)
+    ): (Option[Output], (Option[Output], Memory)) = {
+      val (pastOutput, pastMemory) = past
+      argument match {
+        case None => (pastOutput, (pastOutput, pastMemory))
+        case Some(argument) =>
+          val output = self(argument, pastMemory)
+          (Some(output._1), (Some(output._1), output._2))
+      }
+    }
+    toReactiveStream(_cachedIfNoInput)
+  }
+
+  def cachedChannel()
+      : ReactiveStream[(Boolean, Input), Option[Output], (Option[Output], Memory)] = {
+    def _cachedChannel(
+        argument: (Boolean, Input),
+        past: (Option[Output], Memory)
+    ): (Option[Output], (Option[Output], Memory)) = {
+      val (pastOutput, pastMemory) = past
+      val (shouldReturnCached, input) = argument
+      if (shouldReturnCached) {
+        (pastOutput, (pastOutput, pastMemory))
+      } else {
+        val output = self(input, pastMemory)
+        (Some(output._1), (Some(output._1), output._2))
+      }
+    }
+    toReactiveStream(_cachedChannel)
+  }
+
+  def cachedChannelIfCached()
+      : ReactiveStream[(Boolean, Input), Output, (Option[Output], Memory)] = {
+    def _cachedChannel(
+        argument: (Boolean, Input),
+        past: (Option[Output], Memory)
+    ): (Output, (Option[Output], Memory)) = {
+      val (pastOutput, pastMemory) = past
+      val (shouldReturnCached, input) = argument
+      (shouldReturnCached, pastOutput) match {
+        case (true, Some(pastOutput)) => (pastOutput, (Some(pastOutput), pastMemory))
+        case _ => {
+          val output = self(input, pastMemory)
+          (output._1, (Some(output._1), output._2))
+        }
+      }
+    }
+    toReactiveStream(_cachedChannel)
+  }
+
+  def leftChannelExtendSource[T1, M1](
+      f: (Output) => Source[T1, M1]
+  ): ReactiveStream[Input, (T1, Output), (M1, Memory)] =
+    self
+      .flatMapSource(output => f(output).map((_, output)))
+      .mapMemory(
+        { case (left, right) => (right, left) },
+        { case (left, right) => (right, left) }
+      )
+
+  def leftChannelExtend[T1](
+      f: (Output) => T1
+  ): ReactiveStream[Input, (T1, Output), Memory] =
+    self.map(output => (f(output), output))
+
+  def leftChannelMap[T1, T2](
+      mapF: T1 => T2
+  ): ReactiveStream[(T1, Input), (T2, Output), Memory] = {
+    def _leftChannelMap(
+        argument: (T1, Input),
+        past: Memory
+    ): ((T2, Output), Memory) = {
+      val output = self(argument._2, past)
+      ((mapF(argument._1), output._1), (output._2))
+    }
+    toReactiveStream(_leftChannelMap)
+  }
+
+  def rightChannelExtendSource[T1, M1](
+      f: (Output) => Source[T1, M1]
+  ): ReactiveStream[Input, (Output, T1), (Memory, M1)] =
+    self.flatMapSource(output => f(output).map((output, _)))
+
+  def rightChannelExtend[T1](
+      f: (Output) => T1
+  ): ReactiveStream[Input, (Output, T1), Memory] =
+    self.map(output => (output, f(output)))
+
+  def assumeLeftInput[T1]: ReactiveStream[(T1, Input), (T1, Output), Memory] =
+    assumeInput((input: T1) => self.map((input, _)))
+
+  def assumeRightInput[T1]: ReactiveStream[(Input, T1), (Output, T1), Memory] =
+    assumeInput((input: T1) => self.map((_, input)))
+      .inputMap { case (t1, input) => (input, t1) }
+
+  def connectLeft[T1, T2, M1](
+      f: ReactiveStream[T1, T2, M1]
+  ): ReactiveStream[(T1, Input), (T2, Output), (M1, Memory)] =
+    pair(f, self)
+
+  def connectLeftSource[T1, M1](
+      f: Source[T1, M1]
+  ): ReactiveStream[Input, (T1, Output), (M1, Memory)] =
+    self
+      .flatMapSource(output => f.map((_, output)))
+      .mapMemory(
+        { case (left, right) => (right, left) },
+        { case (left, right) => (right, left) }
+      )
+
+  def connectLeftMap[T1, T2](
+      f: T1 => T2
+  ): ReactiveStream[(T1, Input), (T2, Output), Memory] =
+    assumeInput((input: T1) => self.map((f(input), _)))
+
+  def connectRight[T1, T2, M1](
+      f: ReactiveStream[T1, T2, M1]
+  ): ReactiveStream[(Input, T1), (Output, T2), (Memory, M1)] =
+    pair(self, f)
+
+  def connectRightSource[T1, M1](
+      f: Source[T1, M1]
+  ): ReactiveStream[Input, (Output, T1), (Memory, M1)] =
+    self.flatMapSource(output => f.map((output, _)))
 }
 
 implicit def toReactiveStream[Input, Output, Memory](
@@ -339,6 +519,46 @@ def feedbackChannelSource[T2, T3, Memory](
     (output._1._2, (Some(output._1._1), output._2))
   }
   toSource(_feedbackSource)
+}
+
+def feedbackChannelSourceFlatMap[T1, T2, Memory](
+    fMap: Option[T1] => Source[(T1, T2), Memory]
+): Source[T2, (Option[T1], Memory)] = {
+  def _mapWithFeedback(
+      past: (Option[T1], Memory)
+  ): (T2, (Option[T1], Memory)) = {
+    val (pastOutput, pastFValue) = past
+    val output = fMap(pastOutput)(pastFValue)
+    (output._1._2, (Some(output._1._1), output._2))
+  }
+  toSource(_mapWithFeedback)
+}
+
+def feedbackSourceFlatMap[T2, Memory](
+    fMap: Option[T2] => Source[T2, Memory]
+): Source[T2, (Option[T2], Memory)] = {
+  def _mapWithFeedback(
+      past: (Option[T2], Memory)
+  ): (T2, (Option[T2], Memory)) = {
+    val (pastOutput, pastFValue) = past
+    val output = fMap(pastOutput)(pastFValue)
+    (output._1, (Some(output._1), output._2))
+  }
+  toSource(_mapWithFeedback)
+}
+
+def feedbackSelectSourceFlatMap[T2, T3, Memory](
+    fMap: Option[T2] => Source[T3, Memory],
+    selectMap: T3 => T2
+): Source[T3, (Option[T2], Memory)] = {
+  def _mapWithFeedback(
+      past: (Option[T2], Memory)
+  ): (T3, (Option[T2], Memory)) = {
+    val (pastOutput, pastFValue) = past
+    val output = fMap(pastOutput)(pastFValue)
+    (output._1, (Some(selectMap(output._1)), output._2))
+  }
+  toSource(_mapWithFeedback)
 }
 
 def assumeInput[T1, T2, T3, Memory](
@@ -600,3 +820,19 @@ def anyMemory[Output, Memory](
     source: Source[Output, Option[Memory]]
 ): Source[Output, Option[Any]] =
   source.mapMemory(_.map(_.asInstanceOf[Memory]), _.map(_.asInstanceOf[Any]))
+
+def assumeIdentity[T1]: ReactiveStream[T1, T1, Unit] = {
+  def _assumeIdentity(
+      argument: T1,
+      past: Unit
+  ): (T1, Unit) = {
+    (argument, past)
+  }
+  toReactiveStream(_assumeIdentity)
+}
+
+def withDefaultOutput[Input, Output, Memory](
+    default: Output,
+    f: ReactiveStream[Input, Option[Output], Memory]
+): ReactiveStream[Input, Output, Memory] =
+  f.map((value: Option[Output]) => value.getOrElse(default))
