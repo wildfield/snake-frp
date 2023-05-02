@@ -445,12 +445,14 @@ object TutorialApp {
         }
       })
 
-  var didPressRState = createOption(
-    withPastTime(didPress(EventType.RKeyPress))
+  var didPressRState = create(
+    withPastTime(didPress(EventType.RKeyPress)),
+    None
   )
 
-  var didFocusInState = createOption(
-    withPastTime(didPress(EventType.FocusIn))
+  var didFocusInState = create(
+    withPastTime(didPress(EventType.FocusIn)),
+    None
   )
 
   val drawing =
@@ -473,7 +475,7 @@ object TutorialApp {
             }
           })
     )
-  var drawState = createOption(drawing)
+  var drawState = create(drawing, None)
 
   case class GameState(
       direction: Direction,
@@ -494,7 +496,7 @@ object TutorialApp {
     ]
   ] =
     None
-  var highScoreState = createOption(identityWithMemory.mapWithMemory(keepIfLarger))
+  var highScoreState = create(identityWithMemory.mapWithMemory(keepIfLarger), None)
 
   def stepsSinceLast(
       time: Double,
@@ -507,7 +509,7 @@ object TutorialApp {
     ((steps, stepTime, pastTime), Some(pastTime + stepTime * steps))
   }
 
-  var stepsSinceLastState = createOption(identityWithMemory.mapWithMemory(stepsSinceLast))
+  var stepsSinceLastState = create(identityWithMemory.mapWithMemory(stepsSinceLast), None)
 
   def main(args: Array[String]): Unit = {
     val bounds = Rect(0, 0, canvas.width, canvas.height)
@@ -646,8 +648,9 @@ object TutorialApp {
     })
 
     mainState = Some(
-      createOption(
-        anyMemory(resultStream)
+      create(
+        anyMemory(resultStream),
+        None
       )
     )
 
