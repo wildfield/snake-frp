@@ -5,10 +5,12 @@ import scala.language.implicitConversions
 
 type ReactiveStreamFunc[Input, Output, Memory] =
   (Input, Memory) => (Output, Memory)
-type SourceAny[Output, Memory] =
+type SourceFunc[Output, Memory] =
   (Memory) => (Output, Memory)
+type MapFunc[Input, Output] =
+  (Input) => (Output)
 
-trait Source[Output, Memory] extends SourceAny[Output, Memory] { self =>
+trait Source[Output, Memory] extends SourceFunc[Output, Memory] { self =>
   def map[T](
       mapFunc: Output => T
   ): Source[T, Memory] = {
@@ -100,7 +102,7 @@ trait Source[Output, Memory] extends SourceAny[Output, Memory] { self =>
 }
 
 implicit def toSource[Output, Memory](
-    f: SourceAny[Output, Memory]
+    f: SourceFunc[Output, Memory]
 ): Source[Output, Memory] = new Source[Output, Memory]() {
   def apply(m: Memory) = f(m)
 }
@@ -115,6 +117,20 @@ trait ReactiveStream[Input, Output, Memory] extends ReactiveStreamFunc[Input, Ou
     ): (Output, Memory) = {
       val value1 = self(a, past)
       value1
+    }
+    toSource(_apply)
+  }
+
+  def applySource[M1](
+      a: Source[Input, M1]
+  ): Source[Output, (Memory, M1)] = {
+    def _apply(
+        past: (Memory, M1)
+    ): (Output, (Memory, M1)) = {
+      val (memoryMain, memorySource) = past
+      val valueSource = a(memorySource)
+      val value = self(valueSource._1, memoryMain)
+      (value._1, (value._2, valueSource._2))
     }
     toSource(_apply)
   }
@@ -687,6 +703,36 @@ def pair[T1, T2, T3, T4, M1, M2](
   toReactiveStream(_pairCombinator)
 }
 
+def pair[I1, I2, O1, O2, M](
+    fMap: I2 => O2,
+    stream: ReactiveStream[I1, O1, M]
+): ReactiveStream[(I2, I1), (O2, O1), M] = {
+  def _pairCombinator(
+      argument: (I2, I1),
+      past: M
+  ): ((O2, O1), M) = {
+    val value = stream(argument._2, past)
+    val valueFMap = fMap(argument._1)
+    ((valueFMap, value._1), value._2)
+  }
+  toReactiveStream(_pairCombinator)
+}
+
+def pair[I1, I2, O1, O2, M](
+    stream: ReactiveStream[I1, O1, M],
+    fMap: I2 => O2
+): ReactiveStream[(I1, I2), (O1, O2), M] = {
+  def _pairCombinator(
+      argument: (I1, I2),
+      past: M
+  ): ((O1, O2), M) = {
+    val value = stream(argument._1, past)
+    val valueFMap = fMap(argument._2)
+    ((value._1, valueFMap), value._2)
+  }
+  toReactiveStream(_pairCombinator)
+}
+
 def sharedPair[T1, T2, T3, M1, M2](
     f1: ReactiveStream[T1, T2, M1],
     f2: ReactiveStream[T1, T3, M2]
@@ -701,6 +747,85 @@ def sharedPair[T1, T2, T3, M1, M2](
     ((value1._1, value2._1), (value1._2, value2._2))
   }
   toReactiveStream(_pairCombinator)
+}
+
+def duplicate[I, O, M](
+    stream: ReactiveStream[I, O, M]
+): ReactiveStream[I, (O, O), M] =
+  stream.map(value => (value, value))
+
+def mergeInput[I, O, M](
+    stream: ReactiveStream[(I, I), O, M]
+): ReactiveStream[I, O, M] =
+  stream.inputMap(value => (value, value))
+
+def splitMap[I1, O1, O2, O3, O4, M](
+    stream: ReactiveStream[I1, (O1, O2), M],
+    leftF: O1 => O3,
+    rightF: O2 => O4
+): ReactiveStream[I1, (O3, O4), M] =
+  stream.map(tuple => (leftF(tuple._1), rightF(tuple._2)))
+
+def splitLeftMap[I1, O1, O2, O3, M](
+    stream: ReactiveStream[I1, (O1, O2), M],
+    leftF: O1 => O3
+): ReactiveStream[I1, (O3, O2), M] =
+  stream.map(tuple => (leftF(tuple._1), tuple._2))
+
+def splitRightMap[I1, O1, O2, O4, M](
+    stream: ReactiveStream[I1, (O1, O2), M],
+    rightF: O2 => O4
+): ReactiveStream[I1, (O1, O4), M] =
+  stream.map(tuple => (tuple._1, rightF(tuple._2)))
+
+def splitSourceMap[I1, O1, O2, O3, O4, M, M1, M2](
+    stream: ReactiveStream[I1, (O1, O2), M],
+    leftF: O1 => Source[O3, M1],
+    rightF: O2 => Source[O4, M2]
+): ReactiveStream[I1, (O3, O4), (M, M1, M2)] = {
+  def _splitSourceMap(
+      argument: I1,
+      memory: (M, M1, M2)
+  ): ((O3, O4), (M, M1, M2)) = {
+    val (memoryMain, memoryLeft, memoryRight) = memory
+    val value = stream(argument, memoryMain)
+    val leftValue = leftF(value._1._1)(memoryLeft)
+    val rightValue = rightF(value._1._2)(memoryRight)
+    ((leftValue._1, rightValue._1), (value._2, leftValue._2, rightValue._2))
+  }
+  toReactiveStream(_splitSourceMap)
+}
+
+def splitLeftSourceMap[I1, O1, O2, O3, M, M1, M2](
+    stream: ReactiveStream[I1, (O1, O2), M],
+    leftF: O1 => Source[O3, M1]
+): ReactiveStream[I1, (O3, O2), (M, M1)] = {
+  def _splitSourceMap(
+      argument: I1,
+      memory: (M, M1)
+  ): ((O3, O2), (M, M1)) = {
+    val (memoryMain, memoryLeft) = memory
+    val value = stream(argument, memoryMain)
+    val leftValue = leftF(value._1._1)(memoryLeft)
+    ((leftValue._1, value._1._2), (value._2, leftValue._2))
+  }
+  toReactiveStream(_splitSourceMap)
+}
+
+def splitRightSourceMap[I1, O1, O2, O4, M, M2](
+    stream: ReactiveStream[I1, (O1, O2), M],
+    rightF: O2 => Source[O4, M2]
+): ReactiveStream[I1, (O1, O4), (M, M2)] = {
+  def _splitSourceMap(
+      argument: I1,
+      memory: (M, M2)
+  ): ((O1, O4), (M, M2)) = {
+    val (memoryMain, memoryRight) = memory
+    val value = stream(argument, memoryMain)
+    val rightValue = rightF(value._1._2)(memoryRight)
+    ((value._1._1, rightValue._1), (value._2, rightValue._2))
+  }
+  toReactiveStream(_splitSourceMap)
 }
 
 def pair[T1, T2, M1, M2](
