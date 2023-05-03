@@ -99,6 +99,9 @@ trait Source[Output, Memory] extends SourceFunc[Output, Memory] { self =>
       f: (Output) => Source[T1, M1]
   ): Source[(Output, T1), (Memory, M1)] =
     self.flatMapSource(output => f(output).map((output, _)))
+
+  def duplicate: Source[(Output, Output), Memory] =
+    self.map(value => (value, value))
 }
 
 implicit def toSource[Output, Memory](
@@ -398,6 +401,9 @@ trait ReactiveStream[Input, Output, Memory] extends ReactiveStreamFunc[Input, Ou
       f: Source[T1, M1]
   ): ReactiveStream[Input, (Output, T1), (Memory, M1)] =
     self.flatMapSource(output => f.map((output, _)))
+
+  def duplicate: ReactiveStream[Input, (Output, Output), Memory] =
+    self.map(value => (value, value))
 }
 
 implicit def toReactiveStream[Input, Output, Memory](
@@ -779,11 +785,6 @@ def sharedPair[T1, T2, T3, M1, M2](
   toReactiveStream(_pairCombinator)
 }
 
-def duplicate[I, O, M](
-    stream: ReactiveStream[I, O, M]
-): ReactiveStream[I, (O, O), M] =
-  stream.map(value => (value, value))
-
 def mergeInput[I, O, M](
     stream: ReactiveStream[(I, I), O, M]
 ): ReactiveStream[I, O, M] =
@@ -806,6 +807,12 @@ def splitRightMap[I1, O1, O2, O4, M](
     stream: ReactiveStream[I1, (O1, O2), M],
     rightF: O2 => O4
 ): ReactiveStream[I1, (O1, O4), M] =
+  stream.map(tuple => (tuple._1, rightF(tuple._2)))
+
+def splitRightMap[O1, O2, O4, M](
+    stream: Source[(O1, O2), M],
+    rightF: O2 => O4
+): Source[(O1, O4), M] =
   stream.map(tuple => (tuple._1, rightF(tuple._2)))
 
 def splitSourceMap[I1, O1, O2, O3, O4, M, M1, M2](
@@ -856,6 +863,21 @@ def splitRightSourceMap[I1, O1, O2, O4, M, M2](
     ((value._1._1, rightValue._1), (value._2, rightValue._2))
   }
   toReactiveStream(_splitSourceMap)
+}
+
+def splitRightSourceMap[O1, O2, O4, M, M2](
+    stream: Source[(O1, O2), M],
+    rightF: O2 => Source[O4, M2]
+): Source[(O1, O4), (M, M2)] = {
+  def _splitSourceMap(
+      memory: (M, M2)
+  ): ((O1, O4), (M, M2)) = {
+    val (memoryMain, memoryRight) = memory
+    val value = stream(memoryMain)
+    val rightValue = rightF(value._1._2)(memoryRight)
+    ((value._1._1, rightValue._1), (value._2, rightValue._2))
+  }
+  toSource(_splitSourceMap)
 }
 
 def pair[T1, T2, M1, M2](

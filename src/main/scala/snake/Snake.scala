@@ -615,21 +615,25 @@ object TutorialApp {
         )
 
         anyMemory(
-          pause
-            .rightChannelExtendSource(paused =>
-              toReactiveStream(tick)
-                .applyValue((time, (isGameOver || paused, score)))
-            )
-            .withInitialMemory((None, None))
-            .rightChannelExtendSource { case (_, tick) =>
-              gameInfo.applyValue(tick)
-            }
+          splitRightSourceMap(
+            pause.duplicate,
+            paused =>
+              splitRightSourceMap(
+                toReactiveStream(tick)
+                  .applyValue((time, (isGameOver || paused, score)))
+                  .duplicate,
+                tick => gameInfo.applyValue(tick)
+              )
+                .withInitialMemory((None, None))
+          )
             .withInitialMemory((None, None))
         )
           .map {
             case (
-                  (paused, tick),
-                  ((food, snake, didEatFood, _, direction), (score, isGameOver))
+                  (
+                    paused,
+                    (tick, ((food, snake, didEatFood, _, direction), (score, isGameOver)))
+                  )
                 ) => {
               GameState(
                 direction,
