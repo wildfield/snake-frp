@@ -733,6 +733,36 @@ def pair[I1, I2, O1, O2, M](
   toReactiveStream(_pairCombinator)
 }
 
+def pairSource[I1, I2, O1, O2, M, M2](
+    fMap: I2 => Source[O2, M2],
+    stream: ReactiveStream[I1, O1, M]
+): ReactiveStream[(I2, I1), (O2, O1), (M2, M)] = {
+  def _pairCombinator(
+      argument: (I2, I1),
+      past: (M2, M)
+  ): ((O2, O1), (M2, M)) = {
+    val value = stream(argument._2, past._2)
+    val valueFMap = fMap(argument._1)(past._1)
+    ((valueFMap._1, value._1), (valueFMap._2, value._2))
+  }
+  toReactiveStream(_pairCombinator)
+}
+
+def pairSource[I1, I2, O1, O2, M, M2](
+    stream: ReactiveStream[I1, O1, M],
+    fMap: I2 => Source[O2, M2]
+): ReactiveStream[(I1, I2), (O1, O2), (M, M2)] = {
+  def _pairCombinator(
+      argument: (I1, I2),
+      past: (M, M2)
+  ): ((O1, O2), (M, M2)) = {
+    val value = stream(argument._1, past._1)
+    val valueFMap = fMap(argument._2)(past._2)
+    ((value._1, valueFMap._1), (value._2, valueFMap._2))
+  }
+  toReactiveStream(_pairCombinator)
+}
+
 def sharedPair[T1, T2, T3, M1, M2](
     f1: ReactiveStream[T1, T2, M1],
     f2: ReactiveStream[T1, T3, M2]
