@@ -51,27 +51,6 @@ trait Source[Output, Memory] extends SourceFunc[Output, Memory] { self =>
     toSource(_flatMap)
   }
 
-  def withPastOutput(): Source[(Option[Output], Output), (Option[Output], Memory)] = {
-    def _withPastOutput(
-        past: (Option[Output], Memory)
-    ): ((Option[Output], Output), (Option[Output], Memory)) = {
-      val (pastOutput, pastFValue) = past
-      val output = self(pastFValue)
-      ((pastOutput, output._1), (Some(output._1), output._2))
-    }
-    toSource(_withPastOutput)
-  }
-
-  def mapWithMemory[T](
-      f: (Output, Memory) => (T, Memory)
-  ): Source[T, Memory] = {
-    def _map(past: Memory): (T, Memory) = {
-      val value = self(past)
-      f(value._1, value._2)
-    }
-    toSource(_map)
-  }
-
   def mapMemory[M1](
       inF: M1 => Memory,
       outF: Memory => M1
@@ -107,22 +86,14 @@ trait Source[Output, Memory] extends SourceFunc[Output, Memory] { self =>
       Some(_)
     )
 
-  def rightChannelExtendSource[T1, M1](
-      f: (Output) => Source[T1, M1]
-  ): Source[(Output, T1), (Memory, M1)] =
-    self.sourceMap(output => f(output).map((output, _)))
-
-  def duplicate: Source[(Output, Output), Memory] =
-    self.map(value => (value, value))
-
-  def getSetMap[O2, P1, P2](
+  def bypass[O2, P1, P2](
       get: Output => P1,
       mapF: P1 => P2,
       set: (Output, P2) => O2
   ): Source[O2, Memory] =
     self.map(t => set(t, mapF(get(t))))
 
-  def getSetSourceMap[O2, P1, P2, M1](
+  def bypassSource[O2, P1, P2, M1](
       get: Output => P1,
       mapF: P1 => Source[P2, M1],
       set: (Output, P2) => O2
@@ -187,30 +158,6 @@ trait ReactiveStream[Input, Output, Memory] extends ReactiveStreamFunc[Input, Ou
       (mappedFOutput._1, (fOutput._2, mappedFOutput._2))
     }
     toReactiveStream(_flatMap)
-  }
-
-  def ignoreInput[T](
-  ): ReactiveStream[(T, Input), Output, Memory] = {
-    def _ignoreInput(
-        argument: (T, Input),
-        past: Memory
-    ): (Output, Memory) = {
-      self(argument._2, past)
-    }
-    toReactiveStream(_ignoreInput)
-  }
-
-  def withPastOutput(
-  ): ReactiveStream[Input, (Option[Output], Output), (Option[Output], Memory)] = {
-    def _withPastOutput(
-        argument: Input,
-        past: (Option[Output], Memory)
-    ): ((Option[Output], Output), (Option[Output], Memory)) = {
-      val (pastOutput, pastFValue) = past
-      val output = self(argument, pastFValue)
-      ((pastOutput, output._1), (Some(output._1), output._2))
-    }
-    toReactiveStream(_withPastOutput)
   }
 
   def mapMemory[M1](
@@ -315,14 +262,14 @@ trait ReactiveStream[Input, Output, Memory] extends ReactiveStreamFunc[Input, Ou
   def duplicate: ReactiveStream[Input, (Output, Output), Memory] =
     self.map(value => (value, value))
 
-  def getSetMap[O2, P1, P2](
+  def bypass[O2, P1, P2](
       get: Output => P1,
       mapF: P1 => P2,
       set: (Output, P2) => O2
   ): ReactiveStream[Input, O2, Memory] =
     self.map(t => set(t, mapF(get(t))))
 
-  def getSetSourceMap[O2, P1, P2, M1](
+  def bypassSource[O2, P1, P2, M1](
       get: Output => P1,
       mapF: P1 => Source[P2, M1],
       set: (Output, P2) => O2
@@ -366,7 +313,7 @@ trait Mapping[Input, Output] extends MapFunc[Input, Output] { self =>
     toReactiveStream(_flatMap)
   }
 
-  def getSetSourceMap[O2, P1, P2, M1](
+  def bypassSource[O2, P1, P2, M1](
       get: Output => P1,
       mapF: P1 => Source[P2, M1],
       set: (Output, P2) => O2
@@ -401,15 +348,6 @@ def flatten[T1, T2, T3, M1, M2](
   }
   _flatten _
 }
-
-def isEqualToPast[T1 <: Equals, Memory](
-    f: Source[T1, Memory]
-): Source[(T1, Boolean), (Memory, T1)] =
-  f.getSetSourceMap(
-    identity,
-    value => repeatPast(value).map(_ == value),
-    (_, _)
-  )
 
 def pair[T1, T2, T3, T4, M1, M2](
     f1: ReactiveStream[T1, T2, M1],
@@ -561,4 +499,18 @@ def flattenSource[Output, Memory, M1](
     (output._1._1, (output._1._2, output._2))
   }
   toSource(_flattenSource)
+}
+
+def flattenStream[Input, Output, Memory, M1](
+    f: (Input, Memory) => Source[(Output, Memory), M1]
+): ReactiveStream[Input, Output, (Memory, M1)] = {
+  def _flattenSource(
+      input: Input,
+      past: (Memory, M1)
+  ): (Output, (Memory, M1)) = {
+    val source = f(input, past._1)
+    val output = source(past._2)
+    (output._1._1, (output._1._2, output._2))
+  }
+  toReactiveStream(_flattenSource)
 }

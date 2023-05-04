@@ -396,7 +396,7 @@ object TutorialApp {
 
   def withPastTime[T](f: (Double, Option[Double]) => T): ReactiveStream[Double, T, Option[Double]] =
     identityMapping[Double]
-      .getSetSourceMap(
+      .bypassSource(
         identity,
         value => repeatPast(Option(value)),
         (_, _)
@@ -515,7 +515,6 @@ object TutorialApp {
           )
             .withInitialMemoryAny((None, None))
             .sourceMap { (keyTuples, paused) =>
-
               val directionValidation =
                 toReactiveStream(
                   (input: (List[Direction], Option[Direction]), past: Option[Direction]) =>
@@ -524,19 +523,17 @@ object TutorialApp {
                 )
 
               val actualDirection =
-                anyMemory(
-                  identityMapping[Option[Direction]]
-                    .sourceMap(lastMovedDirection => {
-                      keyValues
-                        .map(desiredDirections)
-                        .sourceMap(desiredDirections => {
-                          directionValidation.applyValue(
-                            (desiredDirections, lastMovedDirection)
-                          )
-                        })
-                    })
-                    .withInitialMemory((None, None))
-                )
+                identityMapping[Option[Direction]]
+                  .sourceMap(lastMovedDirection => {
+                    keyValues
+                      .map(desiredDirections)
+                      .sourceMap(desiredDirections => {
+                        directionValidation.applyValue(
+                          (desiredDirections, lastMovedDirection)
+                        )
+                      })
+                  })
+                  .withInitialMemoryAny((None, None))
 
               flattenSource((input: GameState) => {
                 val pastDirection: Direction = input.direction
@@ -596,7 +593,7 @@ object TutorialApp {
 
                 toReactiveStream(tick)
                   .applyValue((time, (isGameOver || paused, score)))
-                  .getSetSourceMap(
+                  .bypassSource(
                     identity,
                     tick => gameInfo.applyValue(tick),
                     (_, _)
