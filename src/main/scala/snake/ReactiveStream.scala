@@ -114,10 +114,8 @@ trait ReactiveStream[Input, Output, Memory] extends ReactiveStreamFunc[Input, Ou
   ): Source[Output, Memory] = {
     def _apply(
         past: Memory
-    ): (Output, Memory) = {
-      val value1 = self(a, past)
-      value1
-    }
+    ): (Output, Memory) =
+      self(a, past)
     toSource(_apply)
   }
 
@@ -300,8 +298,8 @@ trait ReactiveStream[Input, Output, Memory] extends ReactiveStreamFunc[Input, Ou
           .map(combine.tupled)
       )
 
-  def bypassSource[O2, Intermediate, M1](
-      mapF: (Input, Output) => Source[Intermediate, M1],
+  def sourceBypass[O2, Intermediate, M1](
+      mapF: Input => Source[Intermediate, M1],
       combine: (Output, Intermediate) => O2
   ): ReactiveStream[Input, O2, (Memory, M1)] =
     identityMapping[Input]
@@ -309,7 +307,7 @@ trait ReactiveStream[Input, Output, Memory] extends ReactiveStreamFunc[Input, Ou
         self
           .applyValue(input)
           .sourceMap(output =>
-            mapF(input, output)
+            mapF(input)
               .map(combine(output, _))
           )
       )
@@ -348,14 +346,14 @@ trait Mapping[Input, Output] extends MapFunc[Input, Output] { self =>
   ): ReactiveStream[Input, O2, M1] =
     self.sourceMap(f.applyValue)
 
-  def bypassSource[O2, Intermediate, M1](
-      mapF: (Input, Output) => Source[Intermediate, M1],
+  def sourceBypass[O2, Intermediate, M1](
+      mapF: Input => Source[Intermediate, M1],
       combine: (Output, Intermediate) => O2
   ): ReactiveStream[Input, O2, M1] =
     identityMapping[Input]
       .sourceMap(input =>
         val output = self(input)
-        mapF(input, output).map(combine(output, _))
+        mapF(input).map(combine(output, _))
       )
 }
 
