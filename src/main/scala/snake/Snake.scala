@@ -40,9 +40,9 @@ case class Keys(
 
 object Keys {
   def from_tuples(
-      arguments: ((Option[Double], Option[Double]), (Option[Double], Option[Double]))
+      arguments: ((((Option[Double], Option[Double]), Option[Double]), Option[Double]))
   ): Keys = {
-    val ((left, right), (down, up)) = arguments
+    val (((left, right), down), up) = arguments
     Keys(left, right, down, up)
   }
 }
@@ -142,9 +142,8 @@ object TutorialApp {
 
   def validatedCurrentDirection(
       arguments: (List[Direction], Option[Direction]),
-      past: Option[Direction]
+      pastValue: Direction
   ): Direction = {
-    val pastValue = past.getOrElse(Direction(0, 1))
     val (desiredDirections, lastMovedDirection) = arguments
     lastMovedDirection match {
       case Some(lastMovedDirection) => {
@@ -483,25 +482,25 @@ object TutorialApp {
 
     val resultStream =
       identityMapping[Double]
-        .sourceMap(time => repeatPast(Option(time)).map((_, time)))
-        .sourceMap((pastTime, time) => {
-          val keyTuplesPre =
-            sharedPair(
-              sharedPair(
-                makeButtonLatch(leftPress, leftRelease),
-                makeButtonLatch(rightPress, rightRelease)
-              ).withInitialMemory((None, None)),
-              sharedPair(
-                makeButtonLatch(downPress, downRelease),
-                makeButtonLatch(upPress, upRelease)
-              ).withInitialMemory((None, None))
-            ).withInitialMemoryAny((None, None))
-
+        .partialSource(identity, time => repeatPast(Option(time)), (_, _))
+        .sourceMap((time, pastTime) => {
           val keyTuples =
-            keyTuplesPre
+            makeButtonLatch(leftPress, leftRelease)
+              .sourceBypass(
+                makeButtonLatch(rightPress, rightRelease).applyValue,
+                (_, _)
+              )
+              .sourceBypass(
+                makeButtonLatch(downPress, downRelease).applyValue,
+                (_, _)
+              )
+              .sourceBypass(
+                makeButtonLatch(upPress, upRelease).applyValue,
+                (_, _)
+              )
+              .withInitialMemoryAny((((None, None), None), None))
               .applyValue(pastTime, time)
-
-          val keyValues = keyTuples.map(Keys.from_tuples)
+              .map(Keys.from_tuples)
 
           val pause = {
             val p = pPress(time, pastTime)
@@ -514,26 +513,18 @@ object TutorialApp {
             pause
           )
             .withInitialMemoryAny((None, None))
-            .sourceMap { (keyTuples, paused) =>
+            .sourceMap { (keyValues, paused) =>
               val directionValidation =
-                toReactiveStream(
-                  (input: (List[Direction], Option[Direction]), past: Option[Direction]) =>
-                    val output = validatedCurrentDirection(input, past)
-                    (output, Option(output))
+                toReactiveStream((input: (List[Direction], Option[Direction]), past: Direction) =>
+                  val output = validatedCurrentDirection(input, past)
+                  (output, output)
                 )
+                  .withInitialMemory(Direction(0, 1))
 
               val actualDirection =
-                identityMapping[Option[Direction]]
-                  .sourceMap(lastMovedDirection => {
-                    keyValues
-                      .map(desiredDirections)
-                      .sourceMap(desiredDirections => {
-                        directionValidation.applyValue(
-                          (desiredDirections, lastMovedDirection)
-                        )
-                      })
-                  })
-                  .withInitialMemoryAny((None, None))
+                directionValidation.inputMap[Option[Direction]](lastMovedDirection =>
+                  (desiredDirections(keyValues), lastMovedDirection)
+                )
 
               flattenSource((input: GameState) => {
                 val pastDirection: Direction = input.direction
@@ -542,10 +533,10 @@ object TutorialApp {
                 val isGameOver: Boolean = input.isGameOver
                 val score = input.score
 
-                def snakeInfo(direction: Direction) =
-                  identityMapping[(List[Vect2d], Vect2d, Double)]
+                def snakeInfo =
+                  identityMapping[(Direction, List[Vect2d], Vect2d, Double)]
                     .sourceMap(input =>
-                      val (pastSnake, pastFood, tick) = input
+                      val (direction, pastSnake, pastFood, tick) = input
 
                       val delta = movement(tick, direction)
                       val (foodPos, didEatFood) = food(bounds, pastSnake, pastFood)
@@ -579,17 +570,18 @@ object TutorialApp {
                       )
                     )
 
-                val gameInfo =
-                  actualDirection
-                    .applyValue(Some(pastDirection))
-                    .flatMap(snakeInfo(_))
-                    .withInitialMemoryAny((None, None))
-                    .inputMap((tick: Option[Double]) =>
-                      (pastSnake, pastFood, tick) match {
-                        case (snake, food, Some(tick)) => Some((snake, food, tick))
-                        case _                         => None
-                      }
-                    )
+                val gameInfo = snakeInfo
+                  .inputSourceMap((tick: Option[Double]) =>
+                    actualDirection
+                      .applyValue(Some(pastDirection))
+                      .map(direction =>
+                        tick match {
+                          case None       => None
+                          case Some(tick) => Some((direction, pastSnake, pastFood, tick))
+                        }
+                      )
+                  )
+                  .withInitialMemoryAny((None, None))
 
                 toReactiveStream(tick)
                   .applyValue((time, (isGameOver || paused, score)))
