@@ -409,6 +409,11 @@ trait Mapping[Input, Output] extends MapFunc[Input, Output] { self =>
       set: (Output, P2) => O2
   ): ReactiveStream[Input, O2, M1] =
     self.sourceMap(t => mapF(get(t)).map(set(t, _)))
+
+  def connect[O2, M1](
+      f: ReactiveStream[Output, O2, M1]
+  ): ReactiveStream[Input, O2, M1] =
+    self.sourceMap(f.applyValue)
 }
 
 implicit def toMapping[Input, Output](
@@ -484,30 +489,6 @@ def cachedSource[T1 <: Equals, T2, Memory](
     }
   }
   toSource(_cached)
-}
-
-def assumeInput[T1, T2, T3, Memory](
-    f: T1 => ReactiveStream[T2, T3, Memory]
-): ReactiveStream[(T1, T2), T3, Memory] = {
-  def _assume(
-      argument: (T1, T2),
-      past: Memory
-  ): (T3, Memory) = {
-    f(argument._1)(argument._2, past)
-  }
-  toReactiveStream(_assume)
-}
-
-def assumeInputSource[T1, T2, Memory](
-    f: T1 => Source[T2, Memory]
-): ReactiveStream[T1, T2, Memory] = {
-  def _assumeSource(
-      argument: T1,
-      past: Memory
-  ): (T2, Memory) = {
-    f(argument)(past)
-  }
-  toReactiveStream(_assumeSource)
 }
 
 def detectChange[T1 <: Equals, Memory](
@@ -744,16 +725,6 @@ def anyMemory[Output, Memory](
     source: Source[Output, Option[Memory]]
 ): Source[Output, Option[Any]] =
   source.mapMemory(_.map(_.asInstanceOf[Memory]), _.map(_.asInstanceOf[Any]))
-
-def assumeIdentity[T1]: ReactiveStream[T1, T1, Unit] = {
-  def _assumeIdentity(
-      argument: T1,
-      past: Unit
-  ): (T1, Unit) = {
-    (argument, past)
-  }
-  toReactiveStream(_assumeIdentity)
-}
 
 def withDefaultOutput[Input, Output, Memory](
     default: Output,

@@ -301,14 +301,10 @@ object TutorialApp {
   def makeButtonLatch(
       press: (Double, Option[Double]) => Option[Double],
       release: (Double, Option[Double]) => Option[Double]
-  ): ReactiveStream[(Option[Double], Double), Option[Double], Option[Double]] = {
-    assumeInputSource({
-      case (pastTime: Option[Double], time: Double) => {
-        toReactiveStream(buttonStateLatch)
-          .applyValue((press(time, pastTime), release(time, pastTime)))
-      }
-    })
-  }
+  ): ReactiveStream[(Option[Double], Double), Option[Double], Option[Double]] =
+    identityMapping[(Option[Double], Double)]
+      .andThen((pastTime, time) => (press(time, pastTime), release(time, pastTime)))
+      .connect(toReactiveStream(buttonStateLatch))
 
   def drawSnake(snake: List[Vect2d]): List[DrawOp] = {
     snake.zipWithIndex.map((elem, idx) => {
@@ -424,8 +420,8 @@ object TutorialApp {
   )
 
   val drawing =
-    assumeInputSource(
-      (input: (Option[Double], Boolean, Boolean, Int, List[Vect2d], Vect2d, Int, Boolean)) =>
+    identityMapping[(Option[Double], Boolean, Boolean, Int, List[Vect2d], Vect2d, Int, Boolean)]
+      .sourceMap(input =>
         val (tick, isGameOver, paused, score, snake, food, highScore, focusIn) = input
         toReactiveStream(shouldRedraw)
           .applyValue((tick, paused, isGameOver, focusIn))
@@ -441,7 +437,7 @@ object TutorialApp {
               List()
             }
           })
-    )
+      )
   var drawState = create(drawing, None)
 
   case class GameState(
@@ -530,15 +526,16 @@ object TutorialApp {
 
           val actualDirection =
             anyMemory(
-              assumeInputSource((lastMovedDirection: Option[Direction]) => {
-                keyValues
-                  .map(desiredDirections)
-                  .flatMapSource(desiredDirections => {
-                    directionValidation.applyValue(
-                      (desiredDirections, lastMovedDirection)
-                    )
-                  })
-              })
+              identityMapping[Option[Direction]]
+                .sourceMap(lastMovedDirection => {
+                  keyValues
+                    .map(desiredDirections)
+                    .flatMapSource(desiredDirections => {
+                      directionValidation.applyValue(
+                        (desiredDirections, lastMovedDirection)
+                      )
+                    })
+                })
                 .withInitialMemory((None, None))
             )
 
