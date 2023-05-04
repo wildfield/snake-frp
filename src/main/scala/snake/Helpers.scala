@@ -37,7 +37,7 @@ trait Source[Output, Memory] extends SourceFunc[Output, Memory] { self =>
     toReactiveStream(_flatMap)
   }
 
-  def flatMapSource[T1, MappedMemory](
+  def sourceMap[T1, MappedMemory](
       map: Output => Source[T1, MappedMemory]
   ): Source[T1, (Memory, MappedMemory)] = {
     def _flatMap(
@@ -110,7 +110,7 @@ trait Source[Output, Memory] extends SourceFunc[Output, Memory] { self =>
   def rightChannelExtendSource[T1, M1](
       f: (Output) => Source[T1, M1]
   ): Source[(Output, T1), (Memory, M1)] =
-    self.flatMapSource(output => f(output).map((output, _)))
+    self.sourceMap(output => f(output).map((output, _)))
 
   def duplicate: Source[(Output, Output), Memory] =
     self.map(value => (value, value))
@@ -127,7 +127,7 @@ trait Source[Output, Memory] extends SourceFunc[Output, Memory] { self =>
       mapF: P1 => Source[P2, M1],
       set: (Output, P2) => O2
   ): Source[O2, (Memory, M1)] =
-    self.flatMapSource(t => mapF(get(t)).map(set(t, _)))
+    self.sourceMap(t => mapF(get(t)).map(set(t, _)))
 }
 
 implicit def toSource[Output, Memory](
@@ -174,22 +174,7 @@ trait ReactiveStream[Input, Output, Memory] extends ReactiveStreamFunc[Input, Ou
     toReactiveStream(_map)
   }
 
-  def flatMap[T1, T2, MappedMemory](
-      map: Output => ReactiveStream[T1, T2, MappedMemory]
-  ): ReactiveStream[(Input, T1), T2, (Memory, MappedMemory)] = {
-    def _flatMap(
-        argument: (Input, T1),
-        past: (Memory, MappedMemory)
-    ): (T2, (Memory, MappedMemory)) = {
-      val (pastValueF, pastValueMapped) = past
-      val fOutput = self(argument._1, pastValueF)
-      val mappedFOutput = map(fOutput._1)(argument._2, pastValueMapped)
-      (mappedFOutput._1, (fOutput._2, mappedFOutput._2))
-    }
-    toReactiveStream(_flatMap)
-  }
-
-  def flatMapSource[T, MappedMemory](
+  def sourceMap[T, MappedMemory](
       map: Output => Source[T, MappedMemory]
   ): ReactiveStream[Input, T, (Memory, MappedMemory)] = {
     def _flatMap(
@@ -327,43 +312,6 @@ trait ReactiveStream[Input, Output, Memory] extends ReactiveStreamFunc[Input, Ou
     toReactiveStream(_cachedIfNoInput)
   }
 
-  def cachedChannel()
-      : ReactiveStream[(Boolean, Input), Option[Output], (Option[Output], Memory)] = {
-    def _cachedChannel(
-        argument: (Boolean, Input),
-        past: (Option[Output], Memory)
-    ): (Option[Output], (Option[Output], Memory)) = {
-      val (pastOutput, pastMemory) = past
-      val (shouldReturnCached, input) = argument
-      if (shouldReturnCached) {
-        (pastOutput, (pastOutput, pastMemory))
-      } else {
-        val output = self(input, pastMemory)
-        (Some(output._1), (Some(output._1), output._2))
-      }
-    }
-    toReactiveStream(_cachedChannel)
-  }
-
-  def cachedChannelIfCached()
-      : ReactiveStream[(Boolean, Input), Output, (Option[Output], Memory)] = {
-    def _cachedChannel(
-        argument: (Boolean, Input),
-        past: (Option[Output], Memory)
-    ): (Output, (Option[Output], Memory)) = {
-      val (pastOutput, pastMemory) = past
-      val (shouldReturnCached, input) = argument
-      (shouldReturnCached, pastOutput) match {
-        case (true, Some(pastOutput)) => (pastOutput, (Some(pastOutput), pastMemory))
-        case _ => {
-          val output = self(input, pastMemory)
-          (output._1, (Some(output._1), output._2))
-        }
-      }
-    }
-    toReactiveStream(_cachedChannel)
-  }
-
   def duplicate: ReactiveStream[Input, (Output, Output), Memory] =
     self.map(value => (value, value))
 
@@ -379,7 +327,7 @@ trait ReactiveStream[Input, Output, Memory] extends ReactiveStreamFunc[Input, Ou
       mapF: P1 => Source[P2, M1],
       set: (Output, P2) => O2
   ): ReactiveStream[Input, O2, (Memory, M1)] =
-    self.flatMapSource(t => mapF(get(t)).map(set(t, _)))
+    self.sourceMap(t => mapF(get(t)).map(set(t, _)))
 }
 
 implicit def toReactiveStream[Input, Output, Memory](
@@ -491,19 +439,14 @@ def cachedSource[T1 <: Equals, T2, Memory](
   toSource(_cached)
 }
 
-def detectChange[T1 <: Equals, Memory](
+def isEqualToPast[T1 <: Equals, Memory](
     f: Source[T1, Memory]
-): Source[(Boolean, T1), (Option[T1], Memory)] = {
-  def _detectChange(
-      past: (Option[T1], Memory)
-  ): ((Boolean, T1), (Option[T1], Memory)) = {
-    val (pastOutput, pastFValue) = past
-    val output = f(pastFValue)
-    val didOutputChange = pastOutput.map(_.equals(output._1)).getOrElse(true)
-    ((didOutputChange, output._1), (Some(output._1), output._2))
-  }
-  toSource(_detectChange)
-}
+): Source[(T1, Boolean), (Memory, T1)] =
+  f.getSetSourceMap(
+    identity,
+    value => repeatPast(value).map(_ == value),
+    (_, _)
+  )
 
 def connect[T1, T2, T3, M1, M2](
     f1: ReactiveStream[T1, T2, M1],
@@ -538,7 +481,7 @@ def pair[T1, T2, T3, T4, M1, M2](
 }
 
 def pair[I1, I2, O1, O2, M](
-    fMap: I2 => O2,
+    fMap: Mapping[I2, O2],
     stream: ReactiveStream[I1, O1, M]
 ): ReactiveStream[(I2, I1), (O2, O1), M] = {
   def _pairCombinator(
@@ -554,7 +497,7 @@ def pair[I1, I2, O1, O2, M](
 
 def pair[I1, I2, O1, O2, M](
     stream: ReactiveStream[I1, O1, M],
-    fMap: I2 => O2
+    fMap: Mapping[I2, O2]
 ): ReactiveStream[(I1, I2), (O1, O2), M] = {
   def _pairCombinator(
       argument: (I1, I2),
@@ -567,31 +510,31 @@ def pair[I1, I2, O1, O2, M](
   toReactiveStream(_pairCombinator)
 }
 
-def pairSource[I1, I2, O1, O2, M, M2](
-    fMap: I2 => Source[O2, M2],
+def pair[I1, O1, O2, M, M2](
+    source: Source[O2, M2],
     stream: ReactiveStream[I1, O1, M]
-): ReactiveStream[(I2, I1), (O2, O1), (M2, M)] = {
+): ReactiveStream[I1, (O2, O1), (M2, M)] = {
   def _pairCombinator(
-      argument: (I2, I1),
+      argument: I1,
       past: (M2, M)
   ): ((O2, O1), (M2, M)) = {
-    val value = stream(argument._2, past._2)
-    val valueFMap = fMap(argument._1)(past._1)
+    val value = stream(argument, past._2)
+    val valueFMap = source(past._1)
     ((valueFMap._1, value._1), (valueFMap._2, value._2))
   }
   toReactiveStream(_pairCombinator)
 }
 
-def pairSource[I1, I2, O1, O2, M, M2](
+def pair[I1, O1, O2, M, M2](
     stream: ReactiveStream[I1, O1, M],
-    fMap: I2 => Source[O2, M2]
-): ReactiveStream[(I1, I2), (O1, O2), (M, M2)] = {
+    source: Source[O2, M2]
+): ReactiveStream[I1, (O1, O2), (M, M2)] = {
   def _pairCombinator(
-      argument: (I1, I2),
+      argument: I1,
       past: (M, M2)
   ): ((O1, O2), (M, M2)) = {
-    val value = stream(argument._1, past._1)
-    val valueFMap = fMap(argument._2)(past._2)
+    val value = stream(argument, past._1)
+    val valueFMap = source(past._2)
     ((value._1, valueFMap._1), (value._2, valueFMap._2))
   }
   toReactiveStream(_pairCombinator)
@@ -633,85 +576,13 @@ def pair[T1, T2, M1, M2](
   toSource(_pairCombinator)
 }
 
-def latch[T1, T2](
-    defaultValue: T2,
-    f1: ReactiveStream[T1, Option[T2], Option[T2]]
-): ReactiveStream[T1, T2, Option[T2]] = {
-  def _latch(
-      argument: T1,
-      past: Option[T2]
-  ): (T2, Option[T2]) = {
-    val pastValue = past
-    val value = f1(argument, pastValue)
-    value._1 match {
-      case Some(value) =>
-        (value, Some(value))
-      case None =>
-        pastValue match {
-          case Some(pastValue) =>
-            (pastValue, Some(pastValue))
-          case None =>
-            (defaultValue, Some(defaultValue))
-        }
-    }
-  }
-  toReactiveStream(_latch)
-}
-
-def latchValue[T1](
-    defaultValue: T1,
-    value: Option[T1]
-): Source[T1, Option[T1]] = {
-  def _latch(
-      past: Option[T1]
-  ): (T1, Option[T1]) = {
-    val pastValue = past
-    value match {
-      case Some(value) =>
-        (value, Some(value))
-      case None =>
-        pastValue match {
-          case Some(pastValue) =>
-            (pastValue, Some(pastValue))
-          case None =>
-            (defaultValue, Some(defaultValue))
-        }
-    }
-  }
-  toSource(_latch)
-}
-
-def latchSource[T1](
-    defaultValue: T1,
-    f1: Source[Option[T1], Option[T1]]
-): Source[T1, Option[T1]] = {
-  def _latch(
-      past: Option[T1]
-  ): (T1, Option[T1]) = {
-    val pastValue = past
-    val value = f1(pastValue)
-    value._1 match {
-      case Some(value) =>
-        (value, Some(value))
-      case None =>
-        pastValue match {
-          case Some(pastValue) =>
-            (pastValue, Some(pastValue))
-          case None =>
-            (defaultValue, Some(defaultValue))
-        }
-    }
-  }
-  toSource(_latch)
-}
-
 def repeatPast[Output](
     input: Output
-): Source[Option[Output], Option[Output]] = {
+): Source[Output, Output] = {
   def _repeatPast(
-      past: Option[Output]
-  ): (Option[Output], Option[Output]) = {
-    (past, Some(input))
+      past: Output
+  ): (Output, Output) = {
+    (past, input)
   }
   toSource(_repeatPast)
 }

@@ -407,7 +407,9 @@ object TutorialApp {
   }
 
   def withPastTime[T](f: (Double, Option[Double]) => T): ReactiveStream[Double, T, Option[Double]] =
-    identityMapping[Double].getSetSourceMap(identity, repeatPast(_), (_, _)).map(f.tupled)
+    identityMapping[Double]
+      .getSetSourceMap(identity, repeatPast(Option(_)).withInitialMemory(None), (_, _))
+      .map(f.tupled)
 
   var didPressRState = create(
     withPastTime(didPress(EventType.RKeyPress)),
@@ -489,8 +491,8 @@ object TutorialApp {
 
     val resultStream =
       identityMapping[Double]
-        .sourceMap(time => repeatPast(time).map((_, time)))
-        .flatMapSource((pastTime, time) => {
+        .sourceMap(time => repeatPast(Option(time)).withInitialMemory(None).map((_, time)))
+        .sourceMap((pastTime, time) => {
           val keyTuplesPre = anyMemory(
             sharedPair(
               sharedPair(
@@ -530,7 +532,7 @@ object TutorialApp {
                 .sourceMap(lastMovedDirection => {
                   keyValues
                     .map(desiredDirections)
-                    .flatMapSource(desiredDirections => {
+                    .sourceMap(desiredDirections => {
                       directionValidation.applyValue(
                         (desiredDirections, lastMovedDirection)
                       )
