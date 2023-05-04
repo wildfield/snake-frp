@@ -408,7 +408,11 @@ object TutorialApp {
 
   def withPastTime[T](f: (Double, Option[Double]) => T): ReactiveStream[Double, T, Option[Double]] =
     identityMapping[Double]
-      .getSetSourceMap(identity, repeatPast(Option(_)).withInitialMemory(None), (_, _))
+      .getSetSourceMap(
+        identity,
+        value => repeatPast(Option(value)),
+        (_, _)
+      )
       .map(f.tupled)
 
   var didPressRState = create(
@@ -491,9 +495,9 @@ object TutorialApp {
 
     val resultStream =
       identityMapping[Double]
-        .sourceMap(time => repeatPast(Option(time)).withInitialMemory(None).map((_, time)))
+        .sourceMap(time => repeatPast(Option(time)).map((_, time)))
         .sourceMap((pastTime, time) => {
-          val keyTuplesPre = anyMemory(
+          val keyTuplesPre =
             sharedPair(
               sharedPair(
                 makeButtonLatch(leftPress, leftRelease),
@@ -503,13 +507,11 @@ object TutorialApp {
                 makeButtonLatch(downPress, downRelease),
                 makeButtonLatch(upPress, upRelease)
               ).withInitialMemory((None, None))
-            ).withInitialMemory((None, None))
-          )
+            ).withInitialMemoryAny((None, None))
 
-          val keyTuples = anyMemory(
+          val keyTuples =
             keyTuplesPre
               .applyValue(pastTime, time)
-          )
 
           val keyValues = keyTuples.map(Keys.from_tuples)
 

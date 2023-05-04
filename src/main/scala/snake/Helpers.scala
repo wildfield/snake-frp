@@ -261,7 +261,7 @@ trait ReactiveStream[Input, Output, Memory] extends ReactiveStreamFunc[Input, Ou
     toReactiveStream(_inputMap)
   }
 
-  def inputMapSource[T1, M1](
+  def inputSourceMap[T1, M1](
       mapF: (T1) => Source[Input, M1]
   ): ReactiveStream[T1, Output, (M1, Memory)] = {
     def _inputMap(
@@ -328,6 +328,21 @@ trait ReactiveStream[Input, Output, Memory] extends ReactiveStreamFunc[Input, Ou
       set: (Output, P2) => O2
   ): ReactiveStream[Input, O2, (Memory, M1)] =
     self.sourceMap(t => mapF(get(t)).map(set(t, _)))
+
+  def connect[T3, M2](
+      f2: ReactiveStream[Output, T3, M2]
+  ): ReactiveStream[Input, T3, (Memory, M2)] = {
+    def _connect(
+        argument: Input,
+        past: (Memory, M2)
+    ): (T3, (Memory, M2)) = {
+      val (pastValueF1, pastValueF2) = past
+      val f1Output = self(argument, pastValueF1)
+      val f2Output = f2(f1Output._1, pastValueF2)
+      (f2Output._1, (f1Output._2, f2Output._2))
+    }
+    toReactiveStream(_connect)
+  }
 }
 
 implicit def toReactiveStream[Input, Output, Memory](
@@ -387,58 +402,6 @@ def flatten[T1, T2, T3, M1, M2](
   _flatten _
 }
 
-def cached[T1 <: Equals, T2, Memory](
-    f: ReactiveStream[T1, T2, Memory]
-): ReactiveStream[T1, T2, (Option[T1], Option[T2], Memory)] = {
-  def _cached(
-      argument: T1,
-      past: (Option[T1], Option[T2], Memory)
-  ): (T2, (Option[T1], Option[T2], Memory)) = {
-    val (pastInput, pastOutput, pastFValue) = past
-    (pastInput, pastOutput) match {
-      case (Some(pastInput), Some(pastOutput)) => {
-        val isInputSame = pastInput.equals(argument)
-        if (isInputSame) {
-          (pastOutput, (Some(argument), Some(pastOutput), pastFValue))
-        } else {
-          val output = f(argument, pastFValue)
-          (output._1, (Some(argument), Some(output._1), output._2))
-        }
-      }
-      case _ =>
-        val output = f(argument, pastFValue)
-        (output._1, (Some(argument), Some(output._1), output._2))
-    }
-  }
-  toReactiveStream(_cached)
-}
-
-def cachedSource[T1 <: Equals, T2, Memory](
-    inputs: T1,
-    f: Source[T2, Memory]
-): Source[T2, (Option[T1], Option[T2], Memory)] = {
-  def _cached(
-      past: (Option[T1], Option[T2], Memory)
-  ): (T2, (Option[T1], Option[T2], Memory)) = {
-    val (pastInput, pastOutput, pastFValue) = past
-    (pastInput, pastOutput) match {
-      case (Some(pastInput), Some(pastOutput)) => {
-        val isInputSame = pastInput.equals(inputs)
-        if (isInputSame) {
-          (pastOutput, (Some(inputs), Some(pastOutput), pastFValue))
-        } else {
-          val output = f(pastFValue)
-          (output._1, (Some(inputs), Some(output._1), output._2))
-        }
-      }
-      case _ =>
-        val output = f(pastFValue)
-        (output._1, (Some(inputs), Some(output._1), output._2))
-    }
-  }
-  toSource(_cached)
-}
-
 def isEqualToPast[T1 <: Equals, Memory](
     f: Source[T1, Memory]
 ): Source[(T1, Boolean), (Memory, T1)] =
@@ -447,22 +410,6 @@ def isEqualToPast[T1 <: Equals, Memory](
     value => repeatPast(value).map(_ == value),
     (_, _)
   )
-
-def connect[T1, T2, T3, M1, M2](
-    f1: ReactiveStream[T1, T2, M1],
-    f2: ReactiveStream[T2, T3, M2]
-): ReactiveStream[T1, T3, (M1, M2)] = {
-  def _connect(
-      argument: T1,
-      past: (M1, M2)
-  ): (T3, (M1, M2)) = {
-    val (pastValueF1, pastValueF2) = past
-    val f1Output = f1(argument, pastValueF1)
-    val f2Output = f2(f1Output._1, pastValueF2)
-    (f2Output._1, (f1Output._2, f2Output._2))
-  }
-  toReactiveStream(_connect)
-}
 
 def pair[T1, T2, T3, T4, M1, M2](
     f1: ReactiveStream[T1, T2, M1],
