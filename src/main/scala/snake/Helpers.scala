@@ -2,6 +2,7 @@ package snake
 
 import scala.annotation.targetName
 import scala.language.implicitConversions
+import scala.Predef
 
 type ReactiveStreamFunc[Input, Output, Memory] =
   (Input, Memory) => (Output, Memory)
@@ -9,6 +10,8 @@ type SourceFunc[Output, Memory] =
   (Memory) => (Output, Memory)
 type MapFunc[Input, Output] =
   (Input) => (Output)
+type OutputFunc[Output] =
+  () => (Output)
 
 trait Source[Output, Memory] extends SourceFunc[Output, Memory] { self =>
   def map[T](
@@ -95,6 +98,17 @@ trait Source[Output, Memory] extends SourceFunc[Output, Memory] { self =>
       Some(_)
     )
 
+  def withInitialMemoryAny(
+      initialValue: Memory
+  ): Source[Output, Option[Any]] =
+    self.mapMemory(
+      _ match {
+        case Some(memory) => memory.asInstanceOf[Memory]
+        case None         => initialValue
+      },
+      Some(_)
+    )
+
   def rightChannelExtendSource[T1, M1](
       f: (Output) => Source[T1, M1]
   ): Source[(Output, T1), (Memory, M1)] =
@@ -102,6 +116,20 @@ trait Source[Output, Memory] extends SourceFunc[Output, Memory] { self =>
 
   def duplicate: Source[(Output, Output), Memory] =
     self.map(value => (value, value))
+
+  def getSetMap[O2, P1, P2](
+      get: Output => P1,
+      mapF: P1 => P2,
+      set: (Output, P2) => O2
+  ): Source[O2, Memory] =
+    self.map(t => set(t, mapF(get(t))))
+
+  def getSetSourceMap[O2, P1, P2, M1](
+      get: Output => P1,
+      mapF: P1 => Source[P2, M1],
+      set: (Output, P2) => O2
+  ): Source[O2, (Memory, M1)] =
+    self.flatMapSource(t => mapF(get(t)).map(set(t, _)))
 }
 
 implicit def toSource[Output, Memory](
@@ -222,6 +250,17 @@ trait ReactiveStream[Input, Output, Memory] extends ReactiveStreamFunc[Input, Ou
     self.mapMemory(
       _ match {
         case Some(memory) => memory
+        case None         => initialValue
+      },
+      Some(_)
+    )
+
+  def withInitialMemoryAny(
+      initialValue: Memory
+  ): ReactiveStream[Input, Output, Option[Any]] =
+    self.mapMemory(
+      _ match {
+        case Some(memory) => memory.asInstanceOf[Memory]
         case None         => initialValue
       },
       Some(_)
@@ -404,6 +443,20 @@ trait ReactiveStream[Input, Output, Memory] extends ReactiveStreamFunc[Input, Ou
 
   def duplicate: ReactiveStream[Input, (Output, Output), Memory] =
     self.map(value => (value, value))
+
+  def getSetMap[O2, P1, P2](
+      get: Output => P1,
+      mapF: P1 => P2,
+      set: (Output, P2) => O2
+  ): ReactiveStream[Input, O2, Memory] =
+    self.map(t => set(t, mapF(get(t))))
+
+  def getSetSourceMap[O2, P1, P2, M1](
+      get: Output => P1,
+      mapF: P1 => Source[P2, M1],
+      set: (Output, P2) => O2
+  ): ReactiveStream[Input, O2, (Memory, M1)] =
+    self.flatMapSource(t => mapF(get(t)).map(set(t, _)))
 }
 
 implicit def toReactiveStream[Input, Output, Memory](
@@ -411,6 +464,37 @@ implicit def toReactiveStream[Input, Output, Memory](
 ): ReactiveStream[Input, Output, Memory] = new ReactiveStream[Input, Output, Memory]() {
   def apply(i: Input, m: Memory) = f(i, m)
 }
+
+trait Mapping[Input, Output] extends MapFunc[Input, Output] { self =>
+  def sourceMap[T1, MappedMemory](
+      map: Output => Source[T1, MappedMemory]
+  ): ReactiveStream[Input, T1, MappedMemory] = {
+    def _flatMap(
+        argument: Input,
+        past: MappedMemory
+    ): (T1, MappedMemory) = {
+      val fOutput = self(argument)
+      val mappedFOutput = map(fOutput)(past)
+      (mappedFOutput._1, mappedFOutput._2)
+    }
+    toReactiveStream(_flatMap)
+  }
+
+  def getSetSourceMap[O2, P1, P2, M1](
+      get: Output => P1,
+      mapF: P1 => Source[P2, M1],
+      set: (Output, P2) => O2
+  ): ReactiveStream[Input, O2, M1] =
+    self.sourceMap(t => mapF(get(t)).map(set(t, _)))
+}
+
+implicit def toMapping[Input, Output](
+    f: MapFunc[Input, Output]
+): Mapping[Input, Output] = new Mapping[Input, Output]() {
+  def apply(i: Input) = f(i)
+}
+
+def identityMapping[Output] = toMapping(identity[Output])
 
 def flatten[T1, T2, T3, M1, M2](
     f: ReactiveStream[T1, ReactiveStream[T2, T3, M2], M1]
@@ -597,33 +681,6 @@ def assumeInputSource[T1, T2, Memory](
   toReactiveStream(_assumeSource)
 }
 
-def applyPartial[T1, T2, T3, Memory](
-    f1: ReactiveStream[(T1, T2), T3, Memory],
-    a: T1
-): ReactiveStream[T2, T3, Memory] = {
-  def _apply(
-      argument: T2,
-      past: Memory
-  ): (T3, Memory) = {
-    f1((a, argument), past)
-  }
-  toReactiveStream(_apply)
-}
-
-def applyPartial2[T1, T2, T3, Memory](
-    f1: ReactiveStream[(T1, T2), T3, Memory],
-    a: T2
-): ReactiveStream[T1, T3, Memory] = {
-  def _apply(
-      argument: T1,
-      past: Memory
-  ): (T3, Memory) = {
-    val value1 = f1((argument, a), past)
-    value1
-  }
-  toReactiveStream(_apply)
-}
-
 def detectChange[T1 <: Equals, Memory](
     f: Source[T1, Memory]
 ): Source[(Boolean, T1), (Option[T1], Memory)] = {
@@ -636,45 +693,6 @@ def detectChange[T1 <: Equals, Memory](
     ((didOutputChange, output._1), (Some(output._1), output._2))
   }
   toSource(_detectChange)
-}
-
-def identity[T1](): ReactiveStream[T1, T1, Unit] = {
-  def _identity(
-      argument: T1,
-      past: Unit
-  ): (T1, Unit) = {
-    (argument, past)
-  }
-  toReactiveStream(_identity)
-}
-
-def identityWithPast[T1]: ReactiveStream[T1, (Option[T1], T1), Option[T1]] = {
-  def _identity(
-      argument: T1,
-      past: Option[T1]
-  ): ((Option[T1], T1), Option[T1]) = {
-    ((past, argument), Some(argument))
-  }
-  toReactiveStream(_identity)
-}
-
-def identityWithMemory[T1, M1]: ReactiveStream[T1, T1, M1] = {
-  def _identity(
-      argument: T1,
-      past: M1
-  ): (T1, M1) = {
-    (argument, past)
-  }
-  toReactiveStream(_identity)
-}
-
-def identitySource[T1](value: T1): Source[T1, Unit] = {
-  def _identity(
-      past: Unit
-  ): (T1, Unit) = {
-    (value, past)
-  }
-  toSource(_identity)
 }
 
 def connect[T1, T2, T3, M1, M2](
@@ -790,96 +808,6 @@ def mergeInput[I, O, M](
 ): ReactiveStream[I, O, M] =
   stream.inputMap(value => (value, value))
 
-def splitMap[I1, O1, O2, O3, O4, M](
-    stream: ReactiveStream[I1, (O1, O2), M],
-    leftF: O1 => O3,
-    rightF: O2 => O4
-): ReactiveStream[I1, (O3, O4), M] =
-  stream.map(tuple => (leftF(tuple._1), rightF(tuple._2)))
-
-def splitLeftMap[I1, O1, O2, O3, M](
-    stream: ReactiveStream[I1, (O1, O2), M],
-    leftF: O1 => O3
-): ReactiveStream[I1, (O3, O2), M] =
-  stream.map(tuple => (leftF(tuple._1), tuple._2))
-
-def splitRightMap[I1, O1, O2, O4, M](
-    stream: ReactiveStream[I1, (O1, O2), M],
-    rightF: O2 => O4
-): ReactiveStream[I1, (O1, O4), M] =
-  stream.map(tuple => (tuple._1, rightF(tuple._2)))
-
-def splitRightMap[O1, O2, O4, M](
-    stream: Source[(O1, O2), M],
-    rightF: O2 => O4
-): Source[(O1, O4), M] =
-  stream.map(tuple => (tuple._1, rightF(tuple._2)))
-
-def splitSourceMap[I1, O1, O2, O3, O4, M, M1, M2](
-    stream: ReactiveStream[I1, (O1, O2), M],
-    leftF: O1 => Source[O3, M1],
-    rightF: O2 => Source[O4, M2]
-): ReactiveStream[I1, (O3, O4), (M, M1, M2)] = {
-  def _splitSourceMap(
-      argument: I1,
-      memory: (M, M1, M2)
-  ): ((O3, O4), (M, M1, M2)) = {
-    val (memoryMain, memoryLeft, memoryRight) = memory
-    val value = stream(argument, memoryMain)
-    val leftValue = leftF(value._1._1)(memoryLeft)
-    val rightValue = rightF(value._1._2)(memoryRight)
-    ((leftValue._1, rightValue._1), (value._2, leftValue._2, rightValue._2))
-  }
-  toReactiveStream(_splitSourceMap)
-}
-
-def splitLeftSourceMap[I1, O1, O2, O3, M, M1, M2](
-    stream: ReactiveStream[I1, (O1, O2), M],
-    leftF: O1 => Source[O3, M1]
-): ReactiveStream[I1, (O3, O2), (M, M1)] = {
-  def _splitSourceMap(
-      argument: I1,
-      memory: (M, M1)
-  ): ((O3, O2), (M, M1)) = {
-    val (memoryMain, memoryLeft) = memory
-    val value = stream(argument, memoryMain)
-    val leftValue = leftF(value._1._1)(memoryLeft)
-    ((leftValue._1, value._1._2), (value._2, leftValue._2))
-  }
-  toReactiveStream(_splitSourceMap)
-}
-
-def splitRightSourceMap[I1, O1, O2, O4, M, M2](
-    stream: ReactiveStream[I1, (O1, O2), M],
-    rightF: O2 => Source[O4, M2]
-): ReactiveStream[I1, (O1, O4), (M, M2)] = {
-  def _splitSourceMap(
-      argument: I1,
-      memory: (M, M2)
-  ): ((O1, O4), (M, M2)) = {
-    val (memoryMain, memoryRight) = memory
-    val value = stream(argument, memoryMain)
-    val rightValue = rightF(value._1._2)(memoryRight)
-    ((value._1._1, rightValue._1), (value._2, rightValue._2))
-  }
-  toReactiveStream(_splitSourceMap)
-}
-
-def splitRightSourceMap[O1, O2, O4, M, M2](
-    stream: Source[(O1, O2), M],
-    rightF: O2 => Source[O4, M2]
-): Source[(O1, O4), (M, M2)] = {
-  def _splitSourceMap(
-      memory: (M, M2)
-  ): ((O1, O4), (M, M2)) = {
-    val (memoryMain, memoryRight) = memory
-    val value = stream(memoryMain)
-    val rightValue = rightF(value._1._2)(memoryRight)
-    ((value._1._1, rightValue._1), (value._2, rightValue._2))
-  }
-  toSource(_splitSourceMap)
-}
-
 def pair[T1, T2, M1, M2](
     f1: Source[T1, M1],
     f2: Source[T2, M2]
@@ -969,7 +897,7 @@ def latchSource[T1](
 
 def repeatPast[Output](
     input: Output
-): Source[(Option[Output]), Option[Output]] = {
+): Source[Option[Output], Option[Output]] = {
   def _repeatPast(
       past: Option[Output]
   ): (Option[Output], Option[Output]) = {

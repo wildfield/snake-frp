@@ -13,6 +13,7 @@ import scala.annotation.targetName
 import snake._
 import scala.collection.mutable.ArrayBuffer
 import scala.collection.mutable.HashMap
+import scala.Predef
 
 val DELTA_T = 25
 
@@ -84,7 +85,7 @@ object TutorialApp {
 
   def accumulate(
       factor: Int = 1
-  ): (Boolean, Option[Int]) => (Int, Option[Int]) = {
+  ): ReactiveStream[Boolean, Int, Option[Int]] = {
     def _accumulate(increment: Boolean, past: Option[Int]): (Int, Option[Int]) = {
       val result = past match {
         case None => {
@@ -96,7 +97,7 @@ object TutorialApp {
       }
       (result, Some(result))
     }
-    _accumulate
+    toReactiveStream(_accumulate)
   }
 
   def keepIfLarger(
@@ -410,12 +411,7 @@ object TutorialApp {
   }
 
   def withPastTime[T](f: (Double, Option[Double]) => T): ReactiveStream[Double, T, Option[Double]] =
-    identityWithPast[Double]
-      .map({
-        case (pastTime, time) => {
-          f(time, pastTime)
-        }
-      })
+    identityMapping[Double].getSetSourceMap(identity, repeatPast(_), (_, _)).map(f.tupled)
 
   var didPressRState = create(
     withPastTime(didPress(EventType.RKeyPress)),
@@ -570,7 +566,7 @@ object TutorialApp {
             )
             .getOrElse((None, None, None, false, 0))
 
-        def snakeInfo(direction: Direction) = anyMemory(
+        def snakeInfo(direction: Direction) =
           assumeInputSource((input: ((List[Vect2d], Vect2d), Double)) =>
             val ((pastSnake: List[Vect2d], pastFood: Vect2d), tick: Double) = input
 
@@ -579,7 +575,7 @@ object TutorialApp {
             val (snakePos, isGameOver) = snake(bounds, delta, didEatFood, pastSnake)
 
             pair(
-              toReactiveStream(accumulate(1))
+              accumulate(1)
                 .applyValue(
                   didEatFood
                 ),
@@ -593,41 +589,37 @@ object TutorialApp {
           )
             .cachedIfNoInput()
             .withInitialMemory((None, None))
-        )
 
-        val gameInfo = anyMemory(
-          applyPartial(
-            withDefaultOutput(
-              ((DEFAULT_FOOD, DEFAULT_SNAKE, false, false, Direction(0, 1)), (0, false)),
-              actualDirection
-                .applyValue(pastDirection)
-                .flatMap(snakeInfo(_))
+        val gameInfo =
+          withDefaultOutput(
+            ((DEFAULT_FOOD, DEFAULT_SNAKE, false, false, Direction(0, 1)), (0, false)),
+            actualDirection
+              .applyValue(pastDirection)
+              .flatMap(snakeInfo(_))
+          )
+            .withInitialMemoryAny((None, None))
+            .inputMap((tick: Option[Double]) =>
+              (pastSnake, pastFood, tick) match {
+                case (Some(snake), Some(food), Some(tick)) => Some(((snake, food), tick))
+                case _                                     => None
+              }
             )
-              .withInitialMemory((None, None))
-              .inputMap((input: ((Option[List[Vect2d]], Option[Vect2d]), Option[Double])) =>
-                input match {
-                  case ((Some(snake), Some(food)), Some(tick)) => Some(((snake, food), tick))
-                  case _                                       => None
-                }
-              ),
-            (pastSnake, pastFood)
-          )
-        )
 
-        anyMemory(
-          splitRightSourceMap(
-            pause.duplicate,
+        pause
+          .getSetSourceMap(
+            identity,
             paused =>
-              splitRightSourceMap(
-                toReactiveStream(tick)
-                  .applyValue((time, (isGameOver || paused, score)))
-                  .duplicate,
-                tick => gameInfo.applyValue(tick)
-              )
-                .withInitialMemory((None, None))
+              toReactiveStream(tick)
+                .applyValue((time, (isGameOver || paused, score)))
+                .getSetSourceMap(
+                  identity,
+                  tick => gameInfo.applyValue(tick),
+                  (_, _)
+                )
+                .withInitialMemoryAny((None, None)),
+            (_, _)
           )
-            .withInitialMemory((None, None))
-        )
+          .withInitialMemoryAny((None, None))
           .map {
             case (
                   (
