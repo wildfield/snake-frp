@@ -13,6 +13,7 @@ import scala.annotation.targetName
 import snake._
 import scala.collection.mutable.ArrayBuffer
 import scala.collection.mutable.HashMap
+import scala.Predef
 
 val DELTA_T = 25
 
@@ -84,19 +85,12 @@ object TutorialApp {
 
   def accumulate(
       factor: Int = 1
-  ): (Boolean, Option[Int]) => (Int, Option[Int]) = {
-    def _accumulate(increment: Boolean, past: Option[Int]): (Int, Option[Int]) = {
-      val result = past match {
-        case None => {
-          (if increment then 1 else 0) * factor
-        }
-        case Some(pastValue) => {
-          (if increment then 1 else 0) * factor + pastValue
-        }
-      }
-      (result, Some(result))
+  ): ReactiveStream[Boolean, Int, Int] = {
+    def _accumulate(increment: Boolean, past: Int): (Int, Int) = {
+      val result = (if increment then 1 else 0) * factor + past
+      (result, result)
     }
-    _accumulate
+    toReactiveStream(_accumulate)
   }
 
   def keepIfLarger(
@@ -225,15 +219,10 @@ object TutorialApp {
 
   def positiveLatch(
       arg: Boolean,
-      past: Option[Boolean]
-  ): (Boolean, Option[Boolean]) = {
-    val curValue = past.getOrElse(false)
-    val output = if (curValue || arg) {
-      true
-    } else {
-      curValue
-    }
-    (output, Some(output))
+      past: Boolean
+  ): (Boolean, Boolean) = {
+    val output = past || arg
+    (output, output)
   }
 
   lazy val DEFAULT_SNAKE: List[Vect2d] = {
@@ -300,14 +289,10 @@ object TutorialApp {
   def makeButtonLatch(
       press: (Double, Option[Double]) => Option[Double],
       release: (Double, Option[Double]) => Option[Double]
-  ): ReactiveStream[(Option[Double], Double), Option[Double], Option[Double]] = {
-    assumeInputSource({
-      case (pastTime: Option[Double], time: Double) => {
-        toReactiveStream(buttonStateLatch)
-          .applyValue((press(time, pastTime), release(time, pastTime)))
-      }
-    })
-  }
+  ): ReactiveStream[(Option[Double], Double), Option[Double], Option[Double]] =
+    identityMapping[(Option[Double], Double)]
+      .andThen((pastTime, time) => (press(time, pastTime), release(time, pastTime)))
+      .connect(toReactiveStream(buttonStateLatch))
 
   def drawSnake(snake: List[Vect2d]): List[DrawOp] = {
     snake.zipWithIndex.map((elem, idx) => {
@@ -410,12 +395,13 @@ object TutorialApp {
   }
 
   def withPastTime[T](f: (Double, Option[Double]) => T): ReactiveStream[Double, T, Option[Double]] =
-    identityWithPast[Double]
-      .map({
-        case (pastTime, time) => {
-          f(time, pastTime)
-        }
-      })
+    identityMapping[Double]
+      .partialSource(
+        identity,
+        value => repeatPast(Option(value)),
+        (_, _)
+      )
+      .map(f.tupled)
 
   var didPressRState = create(
     withPastTime(didPress(EventType.RKeyPress)),
@@ -428,8 +414,8 @@ object TutorialApp {
   )
 
   val drawing =
-    assumeInputSource(
-      (input: (Option[Double], Boolean, Boolean, Int, List[Vect2d], Vect2d, Int, Boolean)) =>
+    identityMapping[(Option[Double], Boolean, Boolean, Int, List[Vect2d], Vect2d, Int, Boolean)]
+      .sourceMap(input =>
         val (tick, isGameOver, paused, score, snake, food, highScore, focusIn) = input
         toReactiveStream(shouldRedraw)
           .applyValue((tick, paused, isGameOver, focusIn))
@@ -445,7 +431,7 @@ object TutorialApp {
               List()
             }
           })
-    )
+      )
   var drawState = create(drawing, None)
 
   case class GameState(
@@ -495,161 +481,168 @@ object TutorialApp {
     val pPress = didPress(EventType.PKeyPress)
     val focusOut = didPress(EventType.FocusOut)
 
-    val resultStream = assumeInputSource((time: Double) => {
-      val keyTuplesPre = anyMemory(
-        sharedPair(
-          sharedPair(
-            makeButtonLatch(leftPress, leftRelease),
-            makeButtonLatch(rightPress, rightRelease)
-          ).withInitialMemory((None, None)),
-          sharedPair(
-            makeButtonLatch(downPress, downRelease),
-            makeButtonLatch(upPress, upRelease)
-          ).withInitialMemory((None, None))
-        ).withInitialMemory((None, None))
-      )
+    val resultStream =
+      identityMapping[Double]
+        .sourceMap(time => repeatPast(Option(time)).map((_, time)))
+        .sourceMap((pastTime, time) => {
+          val keyTuplesPre =
+            sharedPair(
+              sharedPair(
+                makeButtonLatch(leftPress, leftRelease),
+                makeButtonLatch(rightPress, rightRelease)
+              ).withInitialMemory((None, None)),
+              sharedPair(
+                makeButtonLatch(downPress, downRelease),
+                makeButtonLatch(upPress, upRelease)
+              ).withInitialMemory((None, None))
+            ).withInitialMemoryAny((None, None))
 
-      val keyTuples = anyMemory(
-        repeatPast(time)
-          .flatMapSource { case (pastTime: Option[Double]) =>
-            keyTuplesPre.applyValue((pastTime, time))
+          val keyTuples =
+            keyTuplesPre
+              .applyValue(pastTime, time)
+
+          val keyValues = keyTuples.map(Keys.from_tuples)
+
+          val pause = {
+            val p = pPress(time, pastTime)
+            val out = focusOut(time, pastTime)
+            toReactiveStream(pauseLatch).applyValue((p, out))
           }
-          .withInitialMemory((None, None))
-      )
 
-      val keyValues = keyTuples.map(Keys.from_tuples)
-
-      val pause =
-        anyMemory(
-          repeatPast(time)
-            .flatMapSource({ case (pastTime: Option[Double]) =>
-              val p = pPress(time, pastTime)
-              val out = focusOut(time, pastTime)
-              toReactiveStream(pauseLatch).applyValue((p, out))
-            })
-            .withInitialMemory((None, None))
-        )
-
-      val directionValidation =
-        toReactiveStream((input: (List[Direction], Option[Direction]), past: Option[Direction]) =>
-          val output = validatedCurrentDirection(input, past)
-          (output, Option(output))
-        )
-
-      val actualDirection =
-        anyMemory(
-          assumeInputSource((lastMovedDirection: Option[Direction]) => {
-            keyValues
-              .map(desiredDirections)
-              .flatMapSource(desiredDirections => {
-                directionValidation.applyValue(
-                  (desiredDirections, lastMovedDirection)
+          pair(
+            keyTuples,
+            pause
+          )
+            .withInitialMemoryAny((None, None))
+            .sourceMap { (keyTuples, paused) =>
+              val directionValidation =
+                toReactiveStream(
+                  (input: (List[Direction], Option[Direction]), past: Option[Direction]) =>
+                    val output = validatedCurrentDirection(input, past)
+                    (output, Option(output))
                 )
+
+              val actualDirection =
+                identityMapping[Option[Direction]]
+                  .sourceMap(lastMovedDirection => {
+                    keyValues
+                      .map(desiredDirections)
+                      .sourceMap(desiredDirections => {
+                        directionValidation.applyValue(
+                          (desiredDirections, lastMovedDirection)
+                        )
+                      })
+                  })
+                  .withInitialMemoryAny((None, None))
+
+              flattenSource((input: GameState) => {
+                val pastDirection: Direction = input.direction
+                val pastSnake: List[Vect2d] = input.snake
+                val pastFood: Vect2d = input.foodPos
+                val isGameOver: Boolean = input.isGameOver
+                val score = input.score
+
+                def snakeInfo(direction: Direction) =
+                  identityMapping[(List[Vect2d], Vect2d, Double)]
+                    .sourceMap(input =>
+                      val (pastSnake, pastFood, tick) = input
+
+                      val delta = movement(tick, direction)
+                      val (foodPos, didEatFood) = food(bounds, pastSnake, pastFood)
+                      val (snakePos, isGameOver) = snake(bounds, delta, didEatFood, pastSnake)
+
+                      pair(
+                        accumulate(1)
+                          .applyValue(
+                            didEatFood
+                          ),
+                        toReactiveStream(positiveLatch)
+                          .applyValue(isGameOver)
+                      )
+                        .withInitialMemory((0, false))
+                        .map { case (score, isGameOver) =>
+                          (foodPos, snakePos, didEatFood, direction, score, isGameOver)
+                        }
+                    )
+                    .cachedIfNoInput()
+                    .withInitialMemoryAny(
+                      (
+                        None,
+                        (
+                          input.foodPos,
+                          input.snake,
+                          input.didEatFood,
+                          input.direction,
+                          input.score,
+                          input.isGameOver
+                        )
+                      )
+                    )
+
+                val gameInfo =
+                  actualDirection
+                    .applyValue(Some(pastDirection))
+                    .flatMap(snakeInfo(_))
+                    .withInitialMemoryAny((None, None))
+                    .inputMap((tick: Option[Double]) =>
+                      (pastSnake, pastFood, tick) match {
+                        case (snake, food, Some(tick)) => Some((snake, food, tick))
+                        case _                         => None
+                      }
+                    )
+
+                toReactiveStream(tick)
+                  .applyValue((time, (isGameOver || paused, score)))
+                  .partialSource(
+                    identity,
+                    tick => gameInfo.applyValue(tick),
+                    (_, _)
+                  )
+                  .withInitialMemoryAny((None, None))
+                  .map {
+                    case (
+                          (
+                            tick,
+                            ((food, snake, didEatFood, direction, score, isGameOver))
+                          )
+                        ) => {
+                      GameState(
+                        direction,
+                        tick,
+                        isGameOver,
+                        paused,
+                        score,
+                        snake,
+                        food,
+                        didEatFood
+                      )
+                    }
+                  }
+                  .map(state => (state, state))
               })
-          })
-            .withInitialMemory((None, None))
-        )
-
-      feedbackSourceFlatMap((input: Option[GameState]) => {
-        val (
-          pastDirection: Option[Direction],
-          pastSnake: Option[List[Vect2d]],
-          pastFood: Option[Vect2d],
-          isGameOver: Boolean,
-          score: Int
-        ) =
-          input
-            .map(value =>
-              (
-                Some(value.direction),
-                Some(value.snake),
-                Some(value.foodPos),
-                value.isGameOver,
-                value.score
-              )
-            )
-            .getOrElse((None, None, None, false, 0))
-
-        def snakeInfo(direction: Direction) = anyMemory(
-          assumeInputSource((input: ((List[Vect2d], Vect2d), Double)) =>
-            val ((pastSnake: List[Vect2d], pastFood: Vect2d), tick: Double) = input
-
-            val delta = movement(tick, direction)
-            val (foodPos, didEatFood) = food(bounds, pastSnake, pastFood)
-            val (snakePos, isGameOver) = snake(bounds, delta, didEatFood, pastSnake)
-
-            pair(
-              toReactiveStream(accumulate(1))
-                .applyValue(
-                  didEatFood
-                ),
-              toReactiveStream(positiveLatch)
-                .applyValue(isGameOver)
-            )
-              .withInitialMemory((None, None))
-              .map {
-                ((foodPos, snakePos, didEatFood, isGameOver, direction), _)
-              }
-          )
-            .cachedIfNoInput()
-            .withInitialMemory((None, None))
-        )
-
-        val gameInfo = anyMemory(
-          applyPartial(
-            withDefaultOutput(
-              ((DEFAULT_FOOD, DEFAULT_SNAKE, false, false, Direction(0, 1)), (0, false)),
-              actualDirection
-                .applyValue(pastDirection)
-                .flatMap(snakeInfo(_))
-            )
-              .withInitialMemory((None, None))
-              .inputMap((input: ((Option[List[Vect2d]], Option[Vect2d]), Option[Double])) =>
-                input match {
-                  case ((Some(snake), Some(food)), Some(tick)) => Some(((snake, food), tick))
-                  case _                                       => None
-                }
-              ),
-            (pastSnake, pastFood)
-          )
-        )
-
-        anyMemory(
-          pause
-            .rightChannelExtendSource(paused =>
-              toReactiveStream(tick)
-                .applyValue((time, (isGameOver || paused, score)))
-            )
-            .withInitialMemory((None, None))
-            .rightChannelExtendSource { case (_, tick) =>
-              gameInfo.applyValue(tick)
+                .withInitialMemoryAny(
+                  (
+                    GameState(
+                      Direction(0, 1),
+                      None,
+                      false,
+                      false,
+                      0,
+                      DEFAULT_SNAKE,
+                      DEFAULT_FOOD,
+                      false
+                    ),
+                    None
+                  )
+                )
             }
-            .withInitialMemory((None, None))
-        )
-          .map {
-            case (
-                  (paused, tick),
-                  ((food, snake, didEatFood, _, direction), (score, isGameOver))
-                ) => {
-              GameState(
-                direction,
-                tick,
-                isGameOver,
-                paused,
-                score,
-                snake,
-                food,
-                didEatFood
-              )
-            }
-          }
-      })
-        .withInitialMemory((None, None))
-    })
+            .withInitialMemoryAny((None, None))
+        })
+        .withInitialMemoryAny((None, None))
 
     mainState = Some(
       create(
-        anyMemory(resultStream),
+        resultStream,
         None
       )
     )
