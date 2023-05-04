@@ -546,62 +546,61 @@ object TutorialApp {
             .withInitialMemory((None, None))
         )
 
-      feedbackSourceFlatMap((input: Option[GameState]) => {
-        val (
-          pastDirection: Option[Direction],
-          pastSnake: Option[List[Vect2d]],
-          pastFood: Option[Vect2d],
-          isGameOver: Boolean,
-          score: Int
-        ) =
-          input
-            .map(value =>
-              (
-                Some(value.direction),
-                Some(value.snake),
-                Some(value.foodPos),
-                value.isGameOver,
-                value.score
-              )
-            )
-            .getOrElse((None, None, None, false, 0))
+      flattenSource((input: GameState) => {
+        val pastDirection: Direction = input.direction
+        val pastSnake: List[Vect2d] = input.snake
+        val pastFood: Vect2d = input.foodPos
+        val isGameOver: Boolean = input.isGameOver
+        val score = input.score
 
         def snakeInfo(direction: Direction) =
-          assumeInputSource((input: ((List[Vect2d], Vect2d), Double)) =>
-            val ((pastSnake: List[Vect2d], pastFood: Vect2d), tick: Double) = input
+          identityMapping[((List[Vect2d], Vect2d), Double)]
+            .sourceMap(input =>
+              val ((pastSnake: List[Vect2d], pastFood: Vect2d), tick: Double) = input
 
-            val delta = movement(tick, direction)
-            val (foodPos, didEatFood) = food(bounds, pastSnake, pastFood)
-            val (snakePos, isGameOver) = snake(bounds, delta, didEatFood, pastSnake)
+              val delta = movement(tick, direction)
+              val (foodPos, didEatFood) = food(bounds, pastSnake, pastFood)
+              val (snakePos, isGameOver) = snake(bounds, delta, didEatFood, pastSnake)
 
-            pair(
-              accumulate(1)
-                .applyValue(
-                  didEatFood
-                ),
-              toReactiveStream(positiveLatch)
-                .applyValue(isGameOver)
+              pair(
+                accumulate(1)
+                  .applyValue(
+                    didEatFood
+                  ),
+                toReactiveStream(positiveLatch)
+                  .applyValue(isGameOver)
+              )
+                .withInitialMemory((None, None))
+                .map {
+                  ((foodPos, snakePos, didEatFood, isGameOver, direction), _)
+                }
             )
-              .withInitialMemory((None, None))
-              .map {
-                ((foodPos, snakePos, didEatFood, isGameOver, direction), _)
-              }
-          )
             .cachedIfNoInput()
-            .withInitialMemory((None, None))
+            .withInitialMemoryAny(
+              (
+                None,
+                (
+                  (
+                    DEFAULT_FOOD,
+                    DEFAULT_SNAKE,
+                    false,
+                    false,
+                    Direction(0, 1)
+                  ),
+                  (0, false)
+                )
+              )
+            )
 
         val gameInfo =
-          withDefaultOutput(
-            ((DEFAULT_FOOD, DEFAULT_SNAKE, false, false, Direction(0, 1)), (0, false)),
-            actualDirection
-              .applyValue(pastDirection)
-              .flatMap(snakeInfo(_))
-          )
+          actualDirection
+            .applyValue(Some(pastDirection))
+            .flatMap(snakeInfo(_))
             .withInitialMemoryAny((None, None))
             .inputMap((tick: Option[Double]) =>
               (pastSnake, pastFood, tick) match {
-                case (Some(snake), Some(food), Some(tick)) => Some(((snake, food), tick))
-                case _                                     => None
+                case (snake, food, Some(tick)) => Some(((snake, food), tick))
+                case _                         => None
               }
             )
 
@@ -639,8 +638,14 @@ object TutorialApp {
               )
             }
           }
+          .map(state => (state, state))
       })
-        .withInitialMemory((None, None))
+        .withInitialMemory(
+          (
+            GameState(Direction(0, 1), None, false, false, 0, DEFAULT_SNAKE, DEFAULT_FOOD, false),
+            None
+          )
+        )
     })
 
     mainState = Some(
