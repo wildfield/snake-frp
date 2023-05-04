@@ -396,7 +396,7 @@ object TutorialApp {
 
   def withPastTime[T](f: (Double, Option[Double]) => T): ReactiveStream[Double, T, Option[Double]] =
     identityMapping[Double]
-      .bypassSource(
+      .partialSource(
         identity,
         value => repeatPast(Option(value)),
         (_, _)
@@ -593,7 +593,7 @@ object TutorialApp {
 
                 toReactiveStream(tick)
                   .applyValue((time, (isGameOver || paused, score)))
-                  .bypassSource(
+                  .partialSource(
                     identity,
                     tick => gameInfo.applyValue(tick),
                     (_, _)

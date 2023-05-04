@@ -86,14 +86,14 @@ trait Source[Output, Memory] extends SourceFunc[Output, Memory] { self =>
       Some(_)
     )
 
-  def bypass[O2, P1, P2](
+  def partial[O2, P1, P2](
       get: Output => P1,
       mapF: P1 => P2,
       set: (Output, P2) => O2
   ): Source[O2, Memory] =
     self.map(t => set(t, mapF(get(t))))
 
-  def bypassSource[O2, P1, P2, M1](
+  def partialSource[O2, P1, P2, M1](
       get: Output => P1,
       mapF: P1 => Source[P2, M1],
       set: (Output, P2) => O2
@@ -259,17 +259,14 @@ trait ReactiveStream[Input, Output, Memory] extends ReactiveStreamFunc[Input, Ou
     toReactiveStream(_cachedIfNoInput)
   }
 
-  def duplicate: ReactiveStream[Input, (Output, Output), Memory] =
-    self.map(value => (value, value))
-
-  def bypass[O2, P1, P2](
+  def partial[O2, P1, P2](
       get: Output => P1,
       mapF: P1 => P2,
       set: (Output, P2) => O2
   ): ReactiveStream[Input, O2, Memory] =
     self.map(t => set(t, mapF(get(t))))
 
-  def bypassSource[O2, P1, P2, M1](
+  def partialSource[O2, P1, P2, M1](
       get: Output => P1,
       mapF: P1 => Source[P2, M1],
       set: (Output, P2) => O2
@@ -290,6 +287,32 @@ trait ReactiveStream[Input, Output, Memory] extends ReactiveStreamFunc[Input, Ou
     }
     toReactiveStream(_connect)
   }
+
+  def bypass[O2, Intermediate](
+      mapF: (Input, Output) => Intermediate,
+      combine: (Output, Intermediate) => O2
+  ): ReactiveStream[Input, O2, Memory] =
+    identityMapping[Input]
+      .sourceMap(input =>
+        self
+          .applyValue(input)
+          .map(output => (output, mapF(input, output)))
+          .map(combine.tupled)
+      )
+
+  def bypassSource[O2, Intermediate, M1](
+      mapF: (Input, Output) => Source[Intermediate, M1],
+      combine: (Output, Intermediate) => O2
+  ): ReactiveStream[Input, O2, (Memory, M1)] =
+    identityMapping[Input]
+      .sourceMap(input =>
+        self
+          .applyValue(input)
+          .sourceMap(output =>
+            mapF(input, output)
+              .map(combine(output, _))
+          )
+      )
 }
 
 implicit def toReactiveStream[Input, Output, Memory](
@@ -313,7 +336,7 @@ trait Mapping[Input, Output] extends MapFunc[Input, Output] { self =>
     toReactiveStream(_flatMap)
   }
 
-  def bypassSource[O2, P1, P2, M1](
+  def partialSource[O2, P1, P2, M1](
       get: Output => P1,
       mapF: P1 => Source[P2, M1],
       set: (Output, P2) => O2
@@ -324,6 +347,16 @@ trait Mapping[Input, Output] extends MapFunc[Input, Output] { self =>
       f: ReactiveStream[Output, O2, M1]
   ): ReactiveStream[Input, O2, M1] =
     self.sourceMap(f.applyValue)
+
+  def bypassSource[O2, Intermediate, M1](
+      mapF: (Input, Output) => Source[Intermediate, M1],
+      combine: (Output, Intermediate) => O2
+  ): ReactiveStream[Input, O2, M1] =
+    identityMapping[Input]
+      .sourceMap(input =>
+        val output = self(input)
+        mapF(input, output).map(combine(output, _))
+      )
 }
 
 implicit def toMapping[Input, Output](
@@ -333,21 +366,6 @@ implicit def toMapping[Input, Output](
 }
 
 def identityMapping[Output] = toMapping(identity[Output])
-
-def flatten[T1, T2, T3, M1, M2](
-    f: ReactiveStream[T1, ReactiveStream[T2, T3, M2], M1]
-): ReactiveStream[(T1, T2), T3, (M1, M2)] = {
-  def _flatten(
-      argument: (T1, T2),
-      past: (M1, M2)
-  ): (T3, (M1, M2)) = {
-    val (pastValueF, pastValueMapped) = past
-    val fOutput = f(argument._1, pastValueF)
-    val mappedFOutput = fOutput._1(argument._2, pastValueMapped)
-    (mappedFOutput._1, (fOutput._2, mappedFOutput._2))
-  }
-  _flatten _
-}
 
 def pair[T1, T2, T3, T4, M1, M2](
     f1: ReactiveStream[T1, T2, M1],
