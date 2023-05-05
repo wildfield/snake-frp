@@ -480,6 +480,8 @@ object TutorialApp {
     val pPress = didPress(EventType.PKeyPress)
     val focusOut = didPress(EventType.FocusOut)
 
+    val newTuple = flattenStreamTuple((1, 2))
+
     val resultStream =
       identityMapping[Double]
         .partialSource(identity, time => repeatPast(Option(time)), (_, _))

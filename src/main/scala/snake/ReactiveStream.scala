@@ -3,13 +3,134 @@ package snake
 import scala.annotation.targetName
 import scala.language.implicitConversions
 import scala.Predef
+import scala.NonEmptyTuple
+import scala.util.NotGiven
 
 type ReactiveStreamFunc[Input, Output, Memory] =
   (Input, Memory) => (Output, Memory)
-type SourceFunc[Output, Memory] =
-  (Memory) => (Output, Memory)
-type MapFunc[Input, Output] =
-  (Input) => (Output)
+type SourceFunc[Output, Memory] = ReactiveStreamFunc[Unit, Output, Memory]
+
+extension [Output, Memory](s: ReactiveStreamFunc[Unit, Output, Memory])
+  def apply(past: Memory): (Output, Memory) = s.apply((), past)
+
+extension [Input, Output, Memory](s: ReactiveStreamFunc[Input, Output, Memory])
+  def apply(argument: Input): SourceFunc[Output, Memory] = (_: Unit, past: Memory) =>
+    s(argument, past)
+
+  // def applySource[M2, M3](
+  //     argumentSource: SourceFunc[Input, M2],
+  //     pack: (Memory, M2) => M3,
+  //     unpack: M3 => (Memory, M2)
+  // ): SourceFunc[Output, M3] =
+  //   (_: Unit, pastPacked: M3) =>
+  //     val past = unpack(pastPacked)
+  //     val argument = argumentSource(past(1))
+  //     val output = s(argument(0), past(0))
+  //     (output(0), pack(output(1), argument(1)))
+
+  // def applySource[M2](
+  //     argumentSource: SourceFunc[Input, M2]
+  // ): SourceFunc[Output, (Memory, M2)] = s.applySource(argumentSource, (_, _), identity)
+
+  // def applySourcePrepend[M2 <: Tuple](
+  //     argumentSource: SourceFunc[Input, M2]
+  // ): SourceFunc[Output, Memory *: M2] =
+  //   s.applySource(argumentSource, _ *: _, { case x *: xs => (x, xs) })
+
+  def applyStream[I1, M2, M3](
+      argumentStream: ReactiveStreamFunc[I1, Input, M2],
+      pack: (M2, Memory) => M3,
+      unpack: M3 => (M2, Memory)
+  ): ReactiveStreamFunc[I1, Output, M3] =
+    (input: I1, pastPacked: M3) =>
+      val past = unpack(pastPacked)
+      val argument = argumentStream(input, past(0))
+      val output = s(argument(0), past(1))
+      (output(0), pack(argument(1), output(1)))
+
+  def applyStreamTupled[I1, M2](
+      argumentStream: ReactiveStreamFunc[I1, Input, M2]
+  ): ReactiveStreamFunc[I1, Output, (M2, Memory)] =
+    s.applyStream(argumentStream, (_, _), identity)
+
+  def memoryMap[M1](inF: M1 => Memory, outF: Memory => M1) =
+    (input: Input, past: M1) =>
+      val output = s(input, inF(past))
+      (output(0), outF(output(1)))
+
+extension [I0, O0, M0, I1, O1, M1](
+    t: Tuple2[
+      ReactiveStreamFunc[I0, O0, M0],
+      ReactiveStreamFunc[I1, O1, M1]
+    ]
+)
+  def toStream: ReactiveStreamFunc[(I0, I1), (O0, O1), (M0, M1)] =
+    (input: (I0, I1), mem: (M0, M1)) =>
+      val v0 = t(0)(input(0), mem(0))
+      val v1 = t(1)(input(1), mem(1))
+      ((v0(0), v1(0)), (v0(1), v1(1)))
+
+extension [I, O0, M0, O1, M1](
+    t: Tuple2[
+      ReactiveStreamFunc[I, O0, M0],
+      ReactiveStreamFunc[I, O1, M1]
+    ]
+)
+  def toMergedStream: ReactiveStreamFunc[I, (O0, O1), (M0, M1)] =
+    (input: I, mem: (M0, M1)) =>
+      val v0 = t(0)(input, mem(0))
+      val v1 = t(1)(input, mem(1))
+      ((v0(0), v1(0)), (v0(1), v1(1)))
+
+extension [I0, O0, M0, I1, O1, M1, I2, O2, M2](
+    t: Tuple3[
+      ReactiveStreamFunc[I0, O0, M0],
+      ReactiveStreamFunc[I1, O1, M1],
+      ReactiveStreamFunc[I2, O2, M2],
+    ]
+)
+  def toStream: ReactiveStreamFunc[(I0, I1, I2), (O0, O1, O2), (M0, M1, M2)] =
+    (input: (I0, I1, I2), mem: (M0, M1, M2)) =>
+      val v0 = t(0)(input(0), mem(0))
+      val v1 = t(1)(input(1), mem(1))
+      val v2 = t(2)(input(2), mem(2))
+      ((v0(0), v1(0), v2(0)), (v0(1), v1(1), v2(1)))
+
+extension [I, O0, M0, O1, M1, O2, M2](
+    t: Tuple3[
+      ReactiveStreamFunc[I, O0, M0],
+      ReactiveStreamFunc[I, O1, M1],
+      ReactiveStreamFunc[I, O2, M2],
+    ]
+)
+  def toMergedStream: ReactiveStreamFunc[I, (O0, O1, O2), (M0, M1, M2)] =
+    (input: I, mem: (M0, M1, M2)) =>
+      val v0 = t(0)(input, mem(0))
+      val v1 = t(1)(input, mem(1))
+      val v2 = t(2)(input, mem(2))
+      ((v0(0), v1(0), v2(0)), (v0(1), v1(1), v2(1)))
+
+extension [Input, Output, Memory <: Tuple](s: ReactiveStreamFunc[Input, Output, Memory])
+  def applyStreamPrepend[I1, M2](
+      argumentStream: ReactiveStreamFunc[I1, Input, M2]
+  ): ReactiveStreamFunc[I1, Output, M2 *: Memory] =
+    s.applyStream(argumentStream, _ *: _, { case x *: xs => (x, xs) })
+
+extension [Input, Output, Tup <: Tuple, Memory](
+    s: ReactiveStreamFunc[Input, Output, Memory]
+)(using Memory =:= Option[Tup])
+  def applyStreamOptionPrepend[I1, M2](
+      argumentStream: ReactiveStreamFunc[I1, Input, Option[M2]]
+  ): ReactiveStreamFunc[I1, Output, Option[M2 *: Tup]] =
+    s.applyStream(
+      argumentStream,
+      (m2, m) => m2.flatMap((m2: M2) => m.map((m: Tup) => (m2 *: m))),
+      (m: Option[M2 *: Tup]) =>
+        m match {
+          case Some(m2 *: m) => (Some(m2), Option(m).asInstanceOf[Memory])
+          case None          => (None, Option(None).asInstanceOf[Memory])
+        }
+    )
 
 trait Source[Output, Memory] extends SourceFunc[Output, Memory] { self =>
   def map[T](
