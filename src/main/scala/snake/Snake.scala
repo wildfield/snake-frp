@@ -13,7 +13,6 @@ import scala.annotation.targetName
 import snake._
 import scala.collection.mutable.ArrayBuffer
 import scala.collection.mutable.HashMap
-import scala.Predef
 
 val DELTA_T = 25
 
