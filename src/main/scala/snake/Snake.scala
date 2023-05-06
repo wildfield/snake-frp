@@ -141,9 +141,10 @@ object TutorialApp {
   }
 
   def validatedCurrentDirection(
-      arguments: (List[Direction], Direction)
+      desiredDirections: List[Direction],
+      lastValidatedDirection: Direction,
+      lastMovedDirection: Direction
   ): Direction = {
-    val (desiredDirections, lastMovedDirection) = arguments
     // Ignore directions opposite to the last moved and exactly aligned
     // this allows the snake to process fast inputs
     val result = desiredDirections.find(direction => {
@@ -152,7 +153,7 @@ object TutorialApp {
         (direction.x == lastMovedDirection.x && direction.y == lastMovedDirection.y)
       !invalid
     })
-    result.getOrElse(lastMovedDirection)
+    result.getOrElse(lastValidatedDirection)
   }
 
   def desiredDirections(
@@ -440,7 +441,8 @@ object TutorialApp {
       score: Int,
       snake: List[Vect2d],
       foodPos: Vect2d,
-      didEatFood: Boolean
+      didEatFood: Boolean,
+      lastMovedDirection: Direction
   )
 
   var mainState: Option[
@@ -493,17 +495,25 @@ object TutorialApp {
         val oldGameOver: Boolean = pastState.isGameOver
         val score = pastState.score
 
-        val newDirection =
-          validatedCurrentDirection(desiredDirections(inputState.keys), pastDirection)
+        val desired = desiredDirections(inputState.keys)
+        val newDirection = if (!desired.isEmpty) {
+          validatedCurrentDirection(
+            desired,
+            pastDirection,
+            pastState.lastMovedDirection
+          )
+        } else {
+          pastDirection
+        }
 
-        val (foodPos, didEatFood, snakePos, newGameOver) = tick match {
+        val (foodPos, didEatFood, snakePos, newGameOver, lastMovedDirection) = tick match {
           case Some(tick) =>
             val delta = movement(tick, newDirection)
             val (foodPos, didEatFood) = food(bounds, pastSnake, pastFood)
             val (snakePos, newGameOver) = snake(bounds, delta, didEatFood, pastSnake)
-            (foodPos, didEatFood, snakePos, newGameOver)
+            (foodPos, didEatFood, snakePos, newGameOver, newDirection)
           case None =>
-            (pastFood, false, pastSnake, false)
+            (pastFood, false, pastSnake, false, pastState.lastMovedDirection)
         }
 
         val isGameOver = oldGameOver || newGameOver
@@ -514,10 +524,11 @@ object TutorialApp {
           tick,
           isGameOver,
           inputState.paused,
-          score,
+          newScore,
           snakePos,
           foodPos,
-          didEatFood
+          didEatFood,
+          lastMovedDirection
         )
       }
 
@@ -570,7 +581,8 @@ object TutorialApp {
                 0,
                 DEFAULT_SNAKE,
                 DEFAULT_FOOD,
-                false
+                false,
+                Direction(0, 1)
               )
             ),
             None
