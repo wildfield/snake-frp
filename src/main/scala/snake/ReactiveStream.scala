@@ -9,6 +9,13 @@ import scala.util.NotGiven
 type ReactiveStreamFunc[Input, Output, Memory] =
   (Input, Memory) => (Output, Memory)
 type SourceFunc[Output, Memory] = ReactiveStreamFunc[Unit, Output, Memory]
+type MappingFunc[Input, Output] = Input => Output
+
+extension [Output](s: MappingFunc[Output, Output])
+  def looped: ReactiveStreamFunc[Unit, Output, Output] =
+    (input: Unit, mem: Output) =>
+      val output = s(mem)
+      (output, output)
 
 extension [Output, Memory](s: ReactiveStreamFunc[Unit, Output, Memory])
   def apply(past: Memory): (Output, Memory) = s.apply((), past)
@@ -16,6 +23,12 @@ extension [Output, Memory](s: ReactiveStreamFunc[Unit, Output, Memory])
 extension [Input, Output, Memory](f: Input => SourceFunc[Output, Memory])
   def toStream: ReactiveStreamFunc[Input, Output, Memory] =
     (input: Input, mem: Memory) => f(input)(mem)
+
+extension [Input, Output, Memory, M2](f: (Input, Memory) => SourceFunc[(Output, Memory), M2])
+  def toFlatStream: ReactiveStreamFunc[Input, Output, (Memory, M2)] =
+    (input: Input, mem: (Memory, M2)) =>
+      val value = f(input, mem(0))(mem(1))
+      (value(0)(0), (value(0)(1), value(1)))
 
 extension [Input, Output](s: Input => Output)
   def applyStream[I1, M2](
@@ -27,6 +40,9 @@ extension [Input, Output](s: Input => Output)
       (output, argument(1))
 
 extension [Input, Output, Memory](s: ReactiveStreamFunc[Input, Output, Memory])
+  def toMapping: Input => SourceFunc[Output, Memory] =
+    (input: Input) => s.applyInput(input)
+
   def applyInput(argument: Input): SourceFunc[Output, Memory] = (_: Unit, past: Memory) =>
     s(argument, past)
 
@@ -51,11 +67,11 @@ extension [Input, Output, Memory](s: ReactiveStreamFunc[Input, Output, Memory])
       val output = s(input, inF(past))
       (output(0), outF(output(1)))
 
-  def feedback[I, O, S](
-      store: (Output, Memory) => (O, S),
-      read: (I, S) => (Input, Memory)
-  ): ReactiveStreamFunc[I, O, S] =
-    (input: I, mem: S) => store.tupled(s.tupled(read(input, mem)))
+  // def feedback[I, O, S](
+  //     store: (Output, Memory) => (O, S),
+  //     read: (I, S) => (Input, Memory),
+  // ): ReactiveStreamFunc[I, O, S] =
+  //   (input: I, mem: S) => store.tupled(s.tupled(read(input, mem)))
 
   def map[O2](f: Output => O2): ReactiveStreamFunc[Input, O2, Memory] =
     (input: Input, mem: Memory) =>
@@ -72,6 +88,106 @@ extension [Input, Output, Memory](s: ReactiveStreamFunc[Input, Output, Memory])
       },
       Some(_)
     )
+
+  def initializeMemoryAny(
+      initialValue: Memory
+  ): ReactiveStreamFunc[Input, Output, Option[Any]] =
+    s.memoryMap(
+      _ match {
+        case Some(memory) => memory.asInstanceOf[Memory]
+        case None         => initialValue
+      },
+      Some(_)
+    )
+
+  def withInput[O](
+      mapF: (Input, Output) => O
+  ): ReactiveStreamFunc[Input, O, Memory] =
+    (input: Input, mem: Memory) =>
+      val output = s(input, mem)
+      (mapF(input, output(0)), output(1))
+
+  // def inputMap[I](
+  //     mapF: (I) => Input
+  // ): ReactiveStreamFunc[I, Output, Memory] =
+  //   (input: I, mem: Memory) => s.apply(mapF(input), mem)
+
+  // def inputMapStream[I, M1, M2](
+  //     mapF: I => SourceFunc[Input, M1],
+  //     pack: (M1, Memory) => M2,
+  //     unpack: M2 => (M1, Memory)
+  // ): ReactiveStreamFunc[I, Output, M2] =
+  //   (input: I, mem: M2) =>
+  //     val (sourceMem, thisMem) = unpack(mem)
+  //     val newInput = mapF(input)(sourceMem)
+  //     val output = s.apply(newInput(0), thisMem)
+  //     (output(0), pack(newInput(1), output(1)))
+
+  // def inputMapStream[I, M1](
+  //     mapF: I => SourceFunc[Input, M1]
+  // ): ReactiveStreamFunc[I, Output, (M1, Memory)] =
+  //   s.inputMapStream(mapF, (_, _), { case(m1, mem) => (m1, mem) })
+
+  def extend[O1, O2, M1, M2](
+      mapF: Output => SourceFunc[O1, M1],
+      combine: (O1, Output) => O2,
+      pack: (M1, Memory) => M2,
+      unpack: M2 => (M1, Memory)
+  ): ReactiveStreamFunc[Input, O2, M2] =
+    (input: Input, mem: M2) =>
+      val (mappedMem, curMem) = unpack(mem)
+      val output = s.apply(input, curMem)
+      val mappedOutput = mapF(output(0))(mappedMem)
+      (combine(mappedOutput(0), output(0)), pack(mappedOutput(1), output(1)))
+
+  def extendTupled[O1, O2, M1](
+      mapF: Output => SourceFunc[O1, M1],
+      combine: (O1, Output) => O2
+  ): ReactiveStreamFunc[Input, O2, (M1, Memory)] =
+    s.extend(mapF, combine, (_, _), { case (m1, mem) => (m1, mem) })
+
+  // def inputMapStreamTupled[I, M1](
+  //     mapF: I => SourceFunc[Input, M1]
+  // ): ReactiveStreamFunc[I, Output, (M1, Memory)] =
+  //   s.inputMapStream(mapF, (_, _), { case (m1, m) => (m1, m) })
+
+  def parallel[O2, Intermediate, M1, M2](
+      mapF: (Input, Output) => SourceFunc[Intermediate, M1],
+      combine: (Intermediate, Output) => O2,
+      pack: (M1, Memory) => M2,
+      unpack: M2 => (M1, Memory)
+  ): ReactiveStreamFunc[Input, O2, M2] =
+    (input: Input, mem: M2) =>
+      val (parallelMem, currentMem) = unpack(mem)
+      val output = s.apply(input, currentMem)
+      val parallelOutput = mapF(input, output(0))(parallelMem)
+      (combine(parallelOutput(0), output(0)), pack(parallelOutput(1), output(1)))
+
+  def parallelTupled[O2, Intermediate, M1](
+      mapF: (Input, Output) => SourceFunc[Intermediate, M1],
+      combine: (Intermediate, Output) => O2
+  ): ReactiveStreamFunc[Input, O2, (M1, Memory)] =
+    s.parallel(mapF, combine, (_, _), { case (m1, m) => (m1, m) })
+
+  def partial[IntermediateI, O2, Intermediate, M1, M2](
+      extract: Output => IntermediateI,
+      mapF: IntermediateI => SourceFunc[Intermediate, M1],
+      combine: (Intermediate, Output) => O2,
+      pack: (M1, Memory) => M2,
+      unpack: M2 => (M1, Memory)
+  ): ReactiveStreamFunc[Input, O2, M2] =
+    (input: Input, mem: M2) =>
+      val (parallelMem, currentMem) = unpack(mem)
+      val output = s.apply(input, currentMem)
+      val partialOutput = mapF(extract(output(0)))(parallelMem)
+      (combine(partialOutput(0), output(0)), pack(partialOutput(1), output(1)))
+
+  def partialTupled[IntermediateI, O2, Intermediate, M1](
+      extract: Output => IntermediateI,
+      mapF: IntermediateI => SourceFunc[Intermediate, M1],
+      combine: (Intermediate, Output) => O2
+  ): ReactiveStreamFunc[Input, O2, (M1, Memory)] =
+    s.partial(extract, mapF, combine, (_, _), { case (m1, mem) => (m1, mem) })
 
 extension [I0, O0, M0, I1, O1, M1](
     t: Tuple2[
