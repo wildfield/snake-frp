@@ -82,16 +82,6 @@ object TutorialApp {
     _didPress
   }
 
-  def accumulate(
-      factor: Int = 1
-  ): ReactiveStreamFunc[Boolean, Int, Int] = {
-    def _accumulate(increment: Boolean, past: Int): (Int, Int) = {
-      val result = (if increment then 1 else 0) * factor + past
-      (result, result)
-    }
-    _accumulate
-  }
-
   def keepIfLarger(
       arg: Int,
       past: Option[Int]
@@ -113,8 +103,8 @@ object TutorialApp {
       past: (Option[(Double, Double)])
   ): (Option[Double], Option[(Double, Double)]) = {
     val (time, (stop, score)) = args
-    val accumulatedTime = past.map(_._2).getOrElse(0.0)
-    val pastTime = past.map(_._1)
+    val accumulatedTime = past.map(_(1)).getOrElse(0.0)
+    val pastTime = past.map(_(0))
     pastTime match {
       case Some(pastTime) => {
         val totalAccumulatedTime = (time - pastTime) + accumulatedTime
@@ -127,7 +117,7 @@ object TutorialApp {
           if (!stop) {
             (Some(pulses * SNAKE_SIZE), Some((time, newTime)))
           } else {
-            (None, Some((time, newTime)))
+            (None, Some((time, 0)))
           }
         } else {
           (None, Some((time, totalAccumulatedTime)))
@@ -197,17 +187,16 @@ object TutorialApp {
 
   def pauseLatch(
       input: (Option[Double], Option[Double]),
-      past: Option[Boolean]
-  ): (Boolean, Option[Boolean]) = {
+      pastPauseState: Boolean
+  ): (Boolean, Boolean) = {
     val (pausePressEvent, focusOut) = input
     val pausePress = !pausePressEvent.isEmpty
-    val pastPauseState = past.getOrElse(false)
     val result = if (pausePress || (!pastPauseState && !focusOut.isEmpty)) {
       !pastPauseState
     } else {
       pastPauseState
     }
-    (result, Some(result))
+    (result, result)
   }
 
   def positiveLatch(
@@ -394,14 +383,6 @@ object TutorialApp {
   ): ReactiveStreamFunc[Double, T, Option[Double]] =
     (time: Double, pastTime: Option[Double]) => (f(time, pastTime), Some(time))
 
-  // identityMapping[Double]
-  //   .partialSource(
-  //     identity,
-  //     value => repeatPast(Option(value)),
-  //     (_, _)
-  //   )
-  //   .map(f.tupled)
-
   var didPressRState = create(
     withPastTime(didPress(EventType.RKeyPress)),
     None
@@ -549,7 +530,7 @@ object TutorialApp {
         }
 
         (latches, pause).toMergedStream.map(InputState.apply)
-      }.initializeMemory((None, None))
+      }.initializeMemory((None, false))
 
       toFlatStream((time: Double, past: (Option[Double], GameState)) =>
         past match {
@@ -587,28 +568,6 @@ object TutorialApp {
             None
           )
         )
-
-    // .inputMapStream { case (time: Double, state: GameState) =>
-    //   interval.applyInput(time).map((_, state))
-    // }
-    // .initializeMemory((None, None))
-    // .feedback(
-    //   (state, mem) => (state, (state, mem)),
-    //   { case (time: Double, (state, mem)) => ((time, state), mem) }
-    // )
-    // .initializeMemory(
-    // GameState(
-    //   Direction(0, 1),
-    //   None,
-    //   false,
-    //   false,
-    //   0,
-    //   DEFAULT_SNAKE,
-    //   DEFAULT_FOOD,
-    //   false
-    // ),
-    //   None
-    // )
 
     mainState = Some(
       create(
