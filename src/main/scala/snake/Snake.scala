@@ -363,7 +363,7 @@ object TutorialApp {
 
   def withPastTime[T](
       f: (Double, Option[Double]) => T
-  ): ReactiveStreamFunc[Double, T, Option[Double]] =
+  ): ReactiveStream[Double, T, Option[Double]] =
     (time: Double, pastTime: Option[Double]) => (f(time, pastTime), Some(time))
 
   var didPressRState = create(
