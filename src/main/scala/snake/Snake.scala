@@ -35,7 +35,10 @@ case class Keys(
     right: Option[Double],
     down: Option[Double],
     up: Option[Double]
-)
+) {
+  def tuple =
+    (this.left, this.right, this.down, this.up)
+}
 
 object Keys {
   def from_tuples(
@@ -99,12 +102,11 @@ object TutorialApp {
   // Milliseconds per movement
   val PULSE_TIME: Double = 300.0
   def tick(
-      args: (Double, (Boolean, Int)),
-      past: (Option[(Double, Double)])
-  ): (Option[Double], Option[(Double, Double)]) = {
-    val (time, (stop, score)) = args
-    val accumulatedTime = past.map(_(1)).getOrElse(0.0)
-    val pastTime = past.map(_(0))
+      args: (Double, Option[Double], (Boolean, Int)),
+      past: Double
+  ): (Option[Double], Double) = {
+    val (time, pastTime, (stop, score)) = args
+    val accumulatedTime = past
     pastTime match {
       case Some(pastTime) => {
         val totalAccumulatedTime = (time - pastTime) + accumulatedTime
@@ -115,16 +117,16 @@ object TutorialApp {
           val elapsedTime = pulses * effectivePulseTime
           val newTime = totalAccumulatedTime - elapsedTime
           if (!stop) {
-            (Some(pulses * SNAKE_SIZE), Some((time, newTime)))
+            (Some(pulses * SNAKE_SIZE), newTime)
           } else {
-            (None, Some((time, 0)))
+            (None, 0)
           }
         } else {
-          (None, Some((time, totalAccumulatedTime)))
+          (None, totalAccumulatedTime)
         }
       }
       case None =>
-        (None, Some((time, 0)))
+        (None, 0)
     }
 
   }
@@ -173,7 +175,7 @@ object TutorialApp {
   def buttonStateLatch(
       arg: (Option[Double], Option[Double]),
       past: Option[Double]
-  ): (Option[Double], Option[Double]) = {
+  ): Option[Double] = {
     val (press, release) = arg
     val result = if (!release.isEmpty) {
       None
@@ -182,13 +184,13 @@ object TutorialApp {
     } else {
       past
     }
-    (result, result)
+    result
   }
 
   def pauseLatch(
       input: (Option[Double], Option[Double]),
       pastPauseState: Boolean
-  ): (Boolean, Boolean) = {
+  ): Boolean = {
     val (pausePressEvent, focusOut) = input
     val pausePress = !pausePressEvent.isEmpty
     val result = if (pausePress || (!pastPauseState && !focusOut.isEmpty)) {
@@ -196,7 +198,7 @@ object TutorialApp {
     } else {
       pastPauseState
     }
-    (result, result)
+    result
   }
 
   def positiveLatch(
@@ -271,11 +273,11 @@ object TutorialApp {
   def makeButtonLatch(
       press: (Double, Option[Double]) => Option[Double],
       release: (Double, Option[Double]) => Option[Double]
-  ): ReactiveStreamFunc[(Option[Double], Double), Option[Double], Option[Double]] =
-    toStream { (pastTime: Option[Double], time: Double) =>
+  ): Loop[(Option[Double], Double), Option[Double]] =
+    toLoop { case (pastTime: Option[Double], time: Double) =>
       val pressed = press(time, pastTime)
       val released = release(time, pastTime)
-      buttonStateLatch.applyInput((pressed, released))
+      buttonStateLatch.toLoop.applyInput((pressed, released))
     }
 
   def drawSnake(snake: List[Vect2d]): List[DrawOp] = {
@@ -512,60 +514,74 @@ object TutorialApp {
         )
       }
 
-      def keyStream = toStream { (time: Double, pastTime: Option[Double]) =>
+      def keyStream = toLoop({ (time: Double, pastTime: Option[Double]) =>
         val latches = (
           makeButtonLatch(leftPress, leftRelease),
           makeButtonLatch(rightPress, rightRelease),
           makeButtonLatch(downPress, downRelease),
           makeButtonLatch(upPress, upRelease)
-        ).toMergedStream
+        ).toMergedLoop
           .applyInput((pastTime, time))
-          .initializeMemory((None, None, None, None))
-          .map(Keys.from_tuples)
+          .memoryMap(
+            Keys.from_tuples,
+            _.tuple
+          )
 
         val pause = {
           val p = pPress(time, pastTime)
           val out = focusOut(time, pastTime)
-          pauseLatch.applyInput((p, out))
+          pauseLatch.toLoop.applyInput((p, out))
         }
 
-        (latches, pause).toMergedStream.map(InputState.apply)
-      }.initializeMemory((None, false))
+        (latches, pause).toMergedLoop
+          .memoryMap(
+            InputState.apply,
+            state => (state.keys, state.paused)
+          )
+      }.tupled)
 
-      toFlatStream((time: Double, past: (Option[Double], GameState)) =>
+      toFlatStream((time: Double, past: (Option[Double], Double, GameState, InputState)) =>
         past match {
-          case (pastTime: Option[Double], pastState: GameState) =>
+          case (
+                pastTime: Option[Double],
+                pastAccumulatedTime: Double,
+                pastState: GameState,
+                inputState: InputState
+              ) =>
             val tickSource =
-              tick.applyInput(time, (pastState.isGameOver || pastState.paused, pastState.score))
+              tick.applyInput(
+                (time, pastTime, (pastState.isGameOver || pastState.paused, pastState.score))
+              )
             val keysSource = keyStream.applyInput(time, pastTime)
             (
               tickSource,
-              keysSource
+              keysSource.outputMemory
             ).toMergedStream
-              .map((tick, inputState) =>
-                val state = newState(tick, pastState, inputState)
-                (state, (Some(time), state))
+              .map((tick, inputState) => newState(tick, pastState, inputState))
+              .outputMemoryMap(
+                { case (state, (tickMem, keysSourceMem)) =>
+                  (Option(time), tickMem, state, keysSourceMem)
+                },
+                tuple => (tuple(1), tuple(3))
               )
-              .initializeMemory((None, None))
         }
       )
         .initializeMemoryAny(
           (
-            (
+            None,
+            0.0,
+            GameState(
+              Direction(0, 1),
               None,
-              GameState(
-                Direction(0, 1),
-                None,
-                false,
-                false,
-                0,
-                DEFAULT_SNAKE,
-                DEFAULT_FOOD,
-                false,
-                Direction(0, 1)
-              )
+              false,
+              false,
+              0,
+              DEFAULT_SNAKE,
+              DEFAULT_FOOD,
+              false,
+              Direction(0, 1)
             ),
-            None
+            InputState(Keys(None, None, None, None), false)
           )
         )
 
