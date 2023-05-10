@@ -520,7 +520,7 @@ object TutorialApp {
           makeButtonLatch(rightPress, rightRelease),
           makeButtonLatch(downPress, downRelease),
           makeButtonLatch(upPress, upRelease)
-        ).toMergedLoop
+        ).toSharedInputLoop
           .applyInput((pastTime, time))
           .memoryMap(
             Keys.from_tuples,
@@ -533,7 +533,7 @@ object TutorialApp {
           pauseLatch.toLoop.applyInput((p, out))
         }
 
-        (latches, pause).toMergedLoop
+        (latches, pause).toSharedInputLoop
           .memoryMap(
             InputState.apply,
             state => (state.keys, state.paused)
@@ -556,9 +556,9 @@ object TutorialApp {
             (
               tickSource,
               keysSource.outputMemory
-            ).toMergedStream
+            ).toSharedInputStream
               .map((tick, inputState) => newState(tick, pastState, inputState))
-              .outputMemoryMap(
+              .memoryOutputMap(
                 { case (state, (tickMem, keysSourceMem)) =>
                   (Option(time), tickMem, state, keysSourceMem)
                 },
@@ -566,7 +566,7 @@ object TutorialApp {
               )
         }
       )
-        .initializeMemoryAny(
+        .memoryToOptionAny(
           (
             None,
             0.0,
