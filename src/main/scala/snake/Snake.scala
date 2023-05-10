@@ -420,16 +420,15 @@ object TutorialApp {
 
   def stepsSinceLast(
       time: Double,
-      past: Option[Double]
-  ): ((Int, Double, Double), Option[Double]) = {
-    val pastTime = past.getOrElse(0.0)
+      pastTime: Double
+  ): ((Int, Double, Double), Double) = {
     var delta = time - pastTime
     val stepTime = (delta / 200.0).max(DELTA_T)
     var steps = (delta / stepTime).floor.toInt
-    ((steps, stepTime, pastTime), Some(pastTime + stepTime * steps))
+    ((steps, stepTime, pastTime), pastTime + stepTime * steps)
   }
 
-  var stepsSinceLastState = create(stepsSinceLast, None)
+  var stepsSinceLastState = create(stepsSinceLast, 0.0)
 
   def main(args: Array[String]): Unit = {
     val bounds = Rect(0, 0, canvas.width, canvas.height)
@@ -521,13 +520,12 @@ object TutorialApp {
           )
       }.tupled)
 
-      toFlatStream((time: Double, past: (Option[Double], Double, GameState, InputState)) =>
+      toFlatStream((time: Double, past: (Option[Double], GameState, Option[Any])) =>
         past match {
           case (
                 pastTime: Option[Double],
-                pastAccumulatedTime: Double,
                 pastState: GameState,
-                inputState: InputState
+                _: Option[Any]
               ) =>
             val tickSource =
               tick.applyInput(
@@ -538,19 +536,19 @@ object TutorialApp {
               tickSource,
               keysSource.outputMemory
             ).toSharedInputStream
+              .memoryToOptionAny((0.0, InputState(Keys(None, None, None, None), false)))
               .map((tick, inputState) => newState(tick, pastState, inputState))
               .memoryOutputMap(
-                { case (state, (tickMem, keysSourceMem)) =>
-                  (Option(time), tickMem, state, keysSourceMem)
+                { case (state, mem) =>
+                  (Option(time), state, mem)
                 },
-                tuple => (tuple(1), tuple(3))
+                tuple => tuple(2)
               )
         }
       )
         .memoryToOptionAny(
           (
             None,
-            0.0,
             GameState(
               Direction(0, 1),
               None,
@@ -562,7 +560,7 @@ object TutorialApp {
               false,
               Direction(0, 1)
             ),
-            InputState(Keys(None, None, None, None), false)
+            None
           )
         )
 
