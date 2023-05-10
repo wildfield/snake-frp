@@ -81,7 +81,7 @@ extension [Input, Output, Memory](s: ReactiveStreamFunc[Input, Output, Memory])
       val output = s(input, inF(past))
       (output(0), outF(output(1)))
 
-  def outputMemoryMap[M1](outF: (Output, Memory) => M1, inF: M1 => Memory) =
+  def memoryOutputMap[M1](outF: (Output, Memory) => M1, inF: M1 => Memory) =
     (input: Input, past: M1) =>
       val output = s(input, inF(past))
       (output(0), outF(output(0), output(1)))
@@ -91,7 +91,7 @@ extension [Input, Output, Memory](s: ReactiveStreamFunc[Input, Output, Memory])
       val output = s(input, mem)
       (f(output(0)), output(1))
 
-  def initializeMemory(
+  def memoryToOption(
       initialValue: Memory
   ): ReactiveStreamFunc[Input, Output, Option[Memory]] =
     s.memoryMap(
@@ -102,7 +102,7 @@ extension [Input, Output, Memory](s: ReactiveStreamFunc[Input, Output, Memory])
       }
     )
 
-  def initializeMemoryAny(
+  def memoryToOptionAny(
       initialValue: Memory
   ): ReactiveStreamFunc[Input, Output, Option[Any]] =
     s.memoryMap(
@@ -131,7 +131,7 @@ extension [I, O0, M0, O1, M1](
       ReactiveStreamFunc[I, O1, M1]
     ]
 )
-  def toMergedStream: ReactiveStreamFunc[I, (O0, O1), (M0, M1)] =
+  def toSharedInputStream: ReactiveStreamFunc[I, (O0, O1), (M0, M1)] =
     (input: I, mem: (M0, M1)) =>
       val v0 = t(0)(input, mem(0))
       val v1 = t(1)(input, mem(1))
@@ -155,7 +155,7 @@ extension [I, M0, M1](
       ReactiveStreamFunc[I, Unit, M1]
     ]
 )
-  def toMergedLoop: ReactiveStreamFunc[I, Unit, (M0, M1)] =
+  def toSharedInputLoop: ReactiveStreamFunc[I, Unit, (M0, M1)] =
     (input: I, mem: (M0, M1)) =>
       val v0 = t(0)(input, mem(0))
       val v1 = t(1)(input, mem(1))
@@ -182,7 +182,7 @@ extension [I, O0, M0, O1, M1, O2, M2](
       ReactiveStreamFunc[I, O2, M2],
     ]
 )
-  def toMergedStream: ReactiveStreamFunc[I, (O0, O1, O2), (M0, M1, M2)] =
+  def toSharedInputStream: ReactiveStreamFunc[I, (O0, O1, O2), (M0, M1, M2)] =
     (input: I, mem: (M0, M1, M2)) =>
       val v0 = t(0)(input, mem(0))
       val v1 = t(1)(input, mem(1))
@@ -213,7 +213,7 @@ extension [I, O0, M0, O1, M1, O2, M2, O3, M3](
       ReactiveStreamFunc[I, O3, M3],
     ]
 )
-  def toMergedStream: ReactiveStreamFunc[I, (O0, O1, O2, O3), (M0, M1, M2, M3)] =
+  def toSharedInputStream: ReactiveStreamFunc[I, (O0, O1, O2, O3), (M0, M1, M2, M3)] =
     (input: I, mem: (M0, M1, M2, M3)) =>
       val v0 = t(0)(input, mem(0))
       val v1 = t(1)(input, mem(1))
@@ -229,7 +229,7 @@ extension [I, M0, M1, M2, M3](
       ReactiveStreamFunc[I, Unit, M3],
     ]
 )
-  def toMergedLoop: ReactiveStreamFunc[I, Unit, (M0, M1, M2, M3)] =
+  def toSharedInputLoop: ReactiveStreamFunc[I, Unit, (M0, M1, M2, M3)] =
     (input: I, mem: (M0, M1, M2, M3)) =>
       val v0 = t(0)(input, mem(0))
       val v1 = t(1)(input, mem(1))
