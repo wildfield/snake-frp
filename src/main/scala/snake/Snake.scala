@@ -201,14 +201,6 @@ object TutorialApp {
     result
   }
 
-  def positiveLatch(
-      arg: Boolean,
-      past: Boolean
-  ): (Boolean, Boolean) = {
-    val output = past || arg
-    (output, output)
-  }
-
   lazy val DEFAULT_SNAKE: List[Vect2d] = {
     val startY = 200
     Vect2d(0, startY) ::
@@ -327,17 +319,6 @@ object TutorialApp {
     val (pastPaused, pastGameOver) = past.getOrElse((false, false))
     val should = focusIn || !(tick.isEmpty && paused == pastPaused && gameOver == pastGameOver)
     (should, Some((paused, gameOver)))
-  }
-
-  def singleTruePulse(
-      past: Option[(Double, Boolean)]
-  ): (Option[Boolean], Boolean) = {
-    val (_, pastValue) = past.getOrElse((0, false))
-    if (pastValue) {
-      (None, pastValue)
-    } else {
-      (Some(true), true)
-    }
   }
 
   def onFrame(time: Double, drawOps: (Double) => Iterable[DrawOp]): Unit = {
