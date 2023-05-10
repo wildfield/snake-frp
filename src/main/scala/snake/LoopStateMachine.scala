@@ -6,12 +6,12 @@ trait StatefulStream[Input, Output, Memory] {
 }
 
 def create[Input, Output, Memory](
-    stream: ReactiveStreamFunc[Input, Output, Memory],
+    stream: ReactiveStream[Input, Output, Memory],
     defaultState: Memory
 ): StatefulStream[Input, Output, Memory] = LoopStateMachine(stream, defaultState)
 
 class LoopStateMachine[Input, Output, Memory](
-    stream: ReactiveStreamFunc[Input, Output, Memory],
+    stream: ReactiveStream[Input, Output, Memory],
     defaultState: Memory
 ) extends StatefulStream[Input, Output, Memory] {
   private var state: Memory = defaultState
